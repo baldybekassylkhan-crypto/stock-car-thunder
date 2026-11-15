@@ -8,6 +8,7 @@ const _t = new THREE.Vector3();
 const _f = new THREE.Vector3();
 const _u = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _Y = new THREE.Vector3(0, 1, 0);
 
 export class CameraRig {
   mode: CamMode = 'chase';
@@ -16,6 +17,26 @@ export class CameraRig {
   private heading = new THREE.Vector3(0, 0, 1);
   private shake = 0;
   private init = false;
+
+  /** Mouse-look offsets (rad). Held: follow the mouse; released: swing back behind the car. */
+  private yaw = 0;
+  private pitch = 0;
+  private looking = false;
+
+  /** Feed mouse drag (pixels). Call once per frame. */
+  mouseLook(held: boolean, dx: number, dy: number, dt: number) {
+    this.looking = held;
+    if (held) {
+      this.yaw -= dx * 0.006;
+      this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.004, -0.35, 1.1);
+      // keep yaw in (-π, π] so the swing-back takes the short way round
+      this.yaw = Math.atan2(Math.sin(this.yaw), Math.cos(this.yaw));
+    } else {
+      const k = 1 - Math.exp(-dt * 3.5);
+      this.yaw -= this.yaw * k;
+      this.pitch -= this.pitch * k;
+    }
+  }
 
   /** Optional occlusion test: distance from `from` toward `dir` until track geometry (or Infinity). */
   occlusion?: (from: THREE.Vector3, dir: THREE.Vector3, max: number) => number;
@@ -47,9 +68,14 @@ export class CameraRig {
       this.heading.lerp(flat, 1 - Math.exp(-dt * (far ? 4 : 6))).normalize();
       const dist = (far ? 10.5 : 7.2) + Math.min(sp, 90) * 0.012;
       const height = far ? 3.4 : 2.25;
-      const want = _t.clone().addScaledVector(this.heading, -dist).add(new THREE.Vector3(0, height, 0));
+      // orbit around the car with the mouse offsets
+      const elev = THREE.MathUtils.clamp(Math.atan2(height, dist) + this.pitch, 0.08, 1.35);
+      const back = this.heading.clone().negate().applyAxisAngle(_Y, this.yaw);
+      const radius = Math.hypot(dist, height);
+      const want = _t.clone().addScaledVector(back, Math.cos(elev) * radius).add(new THREE.Vector3(0, Math.sin(elev) * radius, 0));
       if (!this.init) { this.pos.copy(want); this.init = true; }
-      this.pos.lerp(want, 1 - Math.exp(-dt * 12));
+      const orbiting = this.looking || Math.abs(this.yaw) > 0.02 || Math.abs(this.pitch) > 0.02;
+      this.pos.lerp(want, 1 - Math.exp(-dt * (orbiting ? 30 : 12)));
       // keep the camera on the car's side of walls / fences
       if (this.occlusion) {
         const from = _t.clone().add(new THREE.Vector3(0, 1.2, 0));
@@ -59,7 +85,9 @@ export class CameraRig {
         const hit = this.occlusion(from, dir, len);
         if (hit < len) this.pos.copy(from).addScaledVector(dir, Math.max(0.5, hit - 0.35));
       }
-      const lookAt = _t.clone().addScaledVector(this.heading, 4).add(new THREE.Vector3(0, 1.0, 0));
+      // look a little ahead when behind the car, straight at it when orbited round
+      const ahead = 4 * Math.max(0, Math.cos(this.yaw)) * (1 - Math.min(1, Math.abs(this.pitch)));
+      const lookAt = _t.clone().addScaledVector(this.heading, ahead).add(new THREE.Vector3(0, 1.0, 0));
       this.look.copy(lookAt);
       cam.position.copy(this.pos);
       cam.up.set(0, 1, 0);
@@ -69,7 +97,11 @@ export class CameraRig {
       const local = this.mode === 'hood' ? new THREE.Vector3(0, 1.22, 1.0) : new THREE.Vector3(0.3, 1.12, -0.45);
       cam.position.copy(local.applyQuaternion(_q).add(_t));
       cam.up.copy(_u);
-      cam.lookAt(cam.position.clone().addScaledVector(_f, 20).addScaledVector(_u, this.mode === 'hood' ? -0.6 : -0.9));
+      // look around inside/over the car
+      const dir = _f.clone().applyAxisAngle(_u, this.yaw);
+      const side = dir.clone().cross(_u).normalize();
+      dir.applyAxisAngle(side, -this.pitch * 0.8);
+      cam.lookAt(cam.position.clone().addScaledVector(dir, 20).addScaledVector(_u, this.mode === 'hood' ? -0.6 : -0.9));
       cam.fov = this.mode === 'hood' ? 70 : 75;
       this.init = false;
     } else {

@@ -41,6 +41,7 @@ Open http://localhost:5173.
 | A D / ← → | Steer |
 | Q / E | Shift down / up (manual gearbox; toggle with M) |
 | C | Cycle camera (chase, far chase, hood, cockpit, TV) · next car when spectating |
+| Mouse drag | Hold a mouse button and drag to look around; release and the camera swings back |
 | Hold R (3 s) | Reset car to the track (5 s penalty in a race) · new car in free practice after a wreck |
 | Esc / P | Pause |
 | F3 | Debug overlay |

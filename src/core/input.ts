@@ -32,6 +32,36 @@ export function clearPressed() {
   pressed.clear();
 }
 
+// ---------------- mouse look (hold a mouse button and drag) ----------------
+let mouseDown = false;
+let mouseDX = 0;
+let mouseDY = 0;
+const canvas = document.getElementById('game');
+if (canvas) {
+  canvas.addEventListener('pointerdown', (e) => {
+    mouseDown = true;
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
+    canvas.style.cursor = 'grabbing';
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!mouseDown) return;
+    mouseDX += e.movementX;
+    mouseDY += e.movementY;
+  });
+  const release = () => { mouseDown = false; canvas.style.cursor = ''; };
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+window.addEventListener('blur', () => { mouseDown = false; });
+
+/** Mouse drag since the last call (pixels) and whether a button is held. */
+export function readMouseLook(): { held: boolean; dx: number; dy: number } {
+  const r = { held: mouseDown, dx: mouseDX, dy: mouseDY };
+  mouseDX = mouseDY = 0;
+  return r;
+}
+
 let prevPadButtons: boolean[] = [];
 let padResetHeld = false;
 

@@ -350,6 +350,7 @@ export function pauseScreen(api: { resume(): void; reset(): void; exit(): void; 
         <kbd>A D / ← →</kbd><span>Steer</span>
         <kbd>Q / E</kbd><span>Shift down / up (manual), M toggles</span>
         <kbd>C</kbd><span>Change camera / next car when spectating</span>
+        <kbd>Mouse drag</kbd><span>Hold a mouse button and drag to look around the car</span>
         <kbd>Hold R 3s</kbd><span>Reset to track (5 s penalty in a race) · new car in practice</span>
         <kbd>F3</kbd><span>Debug overlay</span>
         <kbd>Gamepad</kbd><span>Stick steer, RT/LT throttle/brake, LB/RB shift, Y cam, hold X reset</span>

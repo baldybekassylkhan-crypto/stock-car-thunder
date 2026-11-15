@@ -95,7 +95,7 @@ export class Hud {
         <div class="rpm" data-k="rpmwrap"><div data-k="rpm"></div></div>
         <div class="hint" data-k="hint"></div>
       </div>
-      <div class="hud-bl hint">W/S throttle · brake &nbsp; A/D steer &nbsp; C camera &nbsp; hold R reset &nbsp; Esc pause &nbsp; F3 debug</div>
+      <div class="hud-bl hint">W/S throttle · brake &nbsp; A/D steer &nbsp; C camera &nbsp; drag mouse to look &nbsp; hold R reset &nbsp; Esc pause &nbsp; F3 debug</div>
       <div class="debug" data-k="debug" style="display:none"></div>`;
     root.querySelectorAll<HTMLElement>('[data-k]').forEach((e) => (this.els[e.dataset.k!] = e));
     root.querySelectorAll<SVGRectElement>('rect[data-p]').forEach((r) => (this.panelEls[r.dataset.p as PanelName] = r));

@@ -11,7 +11,7 @@ import { dentCar, charCar } from '../damage/visual';
 import { Hud, type TowerRow } from '../ui/hud';
 import { EngineAudio } from '../audio/engine';
 import { LapProgress } from './progress';
-import { readDriverInput, wasPressed, clearPressed, resetHeld, RESET_HOLD, type DriverInput } from './input';
+import { readDriverInput, wasPressed, clearPressed, resetHeld, readMouseLook, RESET_HOLD, type DriverInput } from './input';
 import { settings } from './profile';
 import { encodeState, decodeState } from '../net/codec';
 import { RaceDirector, type RaceSnapshot, type ResultRow } from '../race/race';
@@ -725,6 +725,7 @@ export class Session {
     // ---------------- camera, audio, hud ----------------
     const target = this.spectating >= 0 ? this.visualOf(this.spectating)?.root ?? this.car.visual.root : this.car.visual.root;
     const tSpeed = this.spectating >= 0 ? this.speedOf(this.spectating) : this.car.telemetry.speed;
+    if (interactive) { const m = readMouseLook(); this.rig.mouseLook(m.held, m.dx, m.dy, dt); }
     this.rig.update(dt, target, tSpeed);
     const focus = new THREE.Vector3();
     target.getWorldPosition(focus);
