@@ -33,6 +33,12 @@ export function clearPressed() {
 }
 
 let prevPadButtons: boolean[] = [];
+let padResetHeld = false;
+
+/** Reset button is being held (R key or gamepad X). */
+export const resetHeld = () => isDown('KeyR') || padResetHeld;
+/** How long the reset button must be held (seconds). */
+export const RESET_HOLD = 3;
 let kbSteer = 0;
 
 export function readDriverInput(dt: number, speed: number): DriverInput {
@@ -61,7 +67,7 @@ export function readDriverInput(dt: number, speed: number): DriverInput {
     if (b[5] && !prevPadButtons[5]) shiftUp = true;
     if (b[4] && !prevPadButtons[4]) shiftDown = true;
     if (b[3] && !prevPadButtons[3]) pressed.add('KeyC'); // Y: camera
-    if (b[2] && !prevPadButtons[2]) pressed.add('KeyR'); // X: reset
+    padResetHeld = !!b[2]; // X: hold to reset
     if (b[9] && !prevPadButtons[9]) pressed.add('Escape'); // Start: pause
     prevPadButtons = b;
   }

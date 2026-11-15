@@ -41,11 +41,11 @@ Open http://localhost:5173.
 | A D / ← → | Steer |
 | Q / E | Shift down / up (manual gearbox; toggle with M) |
 | C | Cycle camera (chase, far chase, hood, cockpit, TV) · next car when spectating |
-| R | Reset car to the track (5 s penalty in a race) · new car in free practice after a wreck |
+| Hold R (3 s) | Reset car to the track (5 s penalty in a race) · new car in free practice after a wreck |
 | Esc / P | Pause |
 | F3 | Debug overlay |
 
-Gamepad: left stick steers, RT/LT are throttle/brake, LB/RB shift, Y changes camera, X resets.
+Gamepad: left stick steers, RT/LT are throttle/brake, LB/RB shift, Y changes camera, holding X for 3 s resets.
 
 ## Playing online
 
@@ -62,7 +62,7 @@ A few strict corporate or mobile networks block direct WebRTC connections; on th
 - **Mechanical damage:** engine power, radiator/overheating (engines can blow), steering, wheel alignment (car pulls to one side), punctures, and lost aero.
 - **Fire and explosions:** heavy crash damage sets the car on fire, and it explodes a few seconds later. A single deadly hit (huge velocity change, e.g. head-on into the wall at speed) blows it up instantly: fireball, flying burning debris, a charred shell, and a blast that shoves and damages nearby cars.
 - **Damage setting:** *Realistic*, *Brutal* (about 2× damage, explodes easier) or *Off* (visual dents only).
-- A wreck brings out the yellow flag. In a race a destroyed car is out (DNF) and you spectate; in free practice press R for a new car.
+- A wreck brings out the yellow flag. In a race a destroyed car is out (DNF) and you spectate; in free practice hold R for a new car.
 
 ## How it works
 

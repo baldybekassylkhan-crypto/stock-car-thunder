@@ -11,7 +11,7 @@ import { dentCar, charCar } from '../damage/visual';
 import { Hud, type TowerRow } from '../ui/hud';
 import { EngineAudio } from '../audio/engine';
 import { LapProgress } from './progress';
-import { readDriverInput, wasPressed, clearPressed, type DriverInput } from './input';
+import { readDriverInput, wasPressed, clearPressed, resetHeld, RESET_HOLD, type DriverInput } from './input';
 import { settings } from './profile';
 import { encodeState, decodeState } from '../net/codec';
 import { RaceDirector, type RaceSnapshot, type ResultRow } from '../race/race';
@@ -76,6 +76,7 @@ export class Session {
   private dentT = 0;
   private dentQueue = new Map<number, DentMsg[]>();
   private penalty = 0;
+  private resetHold = 0;
   private spectating = -1;
   private destroyedAt = -1;
   private scrapeLevel = 0;
@@ -602,7 +603,14 @@ export class Session {
         if (this.spectating >= 0) this.nextSpectate();
         else this.rig.next();
       }
-      if (wasPressed('KeyR')) this.requestReset();
+      wasPressed('KeyR'); // a tap does nothing: reset needs a hold
+      if (resetHeld()) {
+        this.resetHold += dt;
+        if (this.resetHold >= RESET_HOLD) {
+          this.requestReset();
+          this.resetHold = -Infinity; // release R before it can fire again
+        }
+      } else this.resetHold = 0;
       if (wasPressed('F3') || wasPressed('Backquote')) this.debug = !this.debug;
       if (wasPressed('KeyM')) { settings.manualGears = !settings.manualGears; this.applyAssists(); this.flash(settings.manualGears ? 'MANUAL GEARS (Q/E)' : 'AUTOMATIC GEARS', 1.5); }
     }
@@ -830,7 +838,8 @@ export class Session {
     });
     const dmg = this.car.damage;
     let status = '';
-    if (dmg.destroyed) status = this.spectating >= 0 ? `DESTROYED — SPECTATING ${this.entry(this.spectating)?.nickname ?? ''} (C: next)` : this.cfg.laps ? 'DESTROYED — DNF' : 'DESTROYED — PRESS R FOR A NEW CAR';
+    if (this.resetHold > 0.15) status = `KEEP HOLDING R — ${dmg.destroyed && !this.cfg.laps ? 'NEW CAR' : 'RESET'} IN ${Math.max(0, RESET_HOLD - this.resetHold).toFixed(1)}s`;
+    else if (dmg.destroyed) status = this.spectating >= 0 ? `DESTROYED — SPECTATING ${this.entry(this.spectating)?.nickname ?? ''} (C: next)` : this.cfg.laps ? 'DESTROYED — DNF' : 'DESTROYED — HOLD R FOR A NEW CAR';
     else if (this.race.phase === 'pace') status = 'PACE LAP — HOLD POSITION';
     else if (this.race.phase === 'caution') status = 'CAUTION — SLOW DOWN';
     else if (this.race.phase === 'loading') status = 'WAITING FOR DRIVERS…';
