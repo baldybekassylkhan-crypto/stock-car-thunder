@@ -408,7 +408,7 @@ export async function loadCedarRidge(o: MapLoadOptions): Promise<LoadedMap> {
     tvCams,
     gridSlot: (slot) => {
       const row = Math.floor(slot / 2);
-      return { i: track.wrap(-140 - row * 6), d: slot % 2 === 0 ? 3.8 : 9.2 };
+      return { i: track.wrap(-6 - row * 6), d: slot % 2 === 0 ? 3.8 : 9.2 };
     },
     paceSpeed: 26,
     oval: false,

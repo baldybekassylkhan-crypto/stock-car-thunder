@@ -329,7 +329,7 @@ export async function loadSunvale(): Promise<LoadedMap> {
     tvCams,
     gridSlot: (slot) => {
       const row = Math.floor(slot / 2);
-      return { i: track.wrap(-300 - row * 7), d: slot % 2 === 0 ? 5.5 : 10.5 };
+      return { i: track.wrap(-6 - row * 6), d: slot % 2 === 0 ? 5.5 : 10.5 };
     },
     paceSpeed: 36,
     oval: true,

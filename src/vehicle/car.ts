@@ -206,15 +206,19 @@ export class Car {
     let throttle = input.throttle;
     let brake = input.brake;
     let steerIn = input.steer;
-    if (this.inputLocked || this.damage.destroyed) {
+    const held = this.inputLocked || this.damage.destroyed;
+    if (held) {
       throttle = 0;
       brake = this.damage.destroyed ? 0.25 : 1;
       steerIn = 0;
+      // held on the grid / during a penalty: stay in first, never creep into reverse
+      if (this.gear === -1) this.gear = 1;
+      this.reverseTimer = 0;
     }
     if (vFwd > this.speedLimit) throttle = 0;
     if (vFwd > this.speedLimit + 4) brake = Math.max(brake, 0.35);
-    // reverse: hold brake when (nearly) stopped
-    if (this.gear !== -1 && Math.abs(vFwd) < 1.0 && brake > 0.5 && throttle < 0.1) {
+    // reverse: the driver holds the brake when (nearly) stopped
+    if (!held && this.gear !== -1 && Math.abs(vFwd) < 1.0 && brake > 0.5 && throttle < 0.1) {
       this.reverseTimer += dt;
       if (this.reverseTimer > 0.35) this.gear = -1;
     } else this.reverseTimer = 0;

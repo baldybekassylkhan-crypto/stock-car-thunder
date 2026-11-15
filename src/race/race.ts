@@ -43,7 +43,7 @@ export interface ResultRow {
 }
 
 /**
- * Host-side race control: countdown → rolling start behind a pace speed → green → cautions for
+ * Host-side race control: standing start (countdown on the grid) → green → cautions for
  * wrecks → white flag → checkered → results. Clients receive RaceSnapshots and mirror them.
  */
 export class RaceDirector {
@@ -93,9 +93,11 @@ export class RaceDirector {
     this.time += dt;
     this.phaseT += dt;
     if (this.phase === 'countdown' && this.phaseT >= 4) {
-      this.phase = this.practice ? 'green' : 'pace';
-      this.flag = this.practice ? 'green' : 'none';
+      // standing start: everyone launches from the grid on GO
+      this.phase = 'green';
+      this.flag = 'green';
       this.phaseT = 0;
+      this.msg = this.practice ? 'GO!' : 'GREEN FLAG — GO!';
     }
     let leaderStarted = false;
     for (const e of this.entrants) {

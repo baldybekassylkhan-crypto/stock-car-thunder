@@ -196,7 +196,7 @@ export class Session {
     if (this.started || !this.director) return;
     this.started = true;
     this.director.start();
-    this.flash(this.cfg.laps ? `${this.cfg.laps} LAPS — ROLLING START` : 'FREE PRACTICE', 3);
+    this.flash(this.cfg.laps ? `${this.cfg.laps} LAPS — GET READY` : 'FREE PRACTICE', 3);
   }
 
   applyAssists() {

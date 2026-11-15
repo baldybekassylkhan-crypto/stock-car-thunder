@@ -190,7 +190,7 @@ export async function loadIronHollow(_o: MapLoadOptions): Promise<LoadedMap> {
     tvCams,
     gridSlot: (slot) => {
       const row = Math.floor(slot / 2);
-      return { i: track.wrap(-95 - row * 6), d: slot % 2 === 0 ? 4 : 9 };
+      return { i: track.wrap(-5 - row * 6), d: slot % 2 === 0 ? 4 : 9 };
     },
     paceSpeed: 24,
     oval: true,

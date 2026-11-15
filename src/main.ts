@@ -171,5 +171,5 @@ else nicknameScreen(() => mainMenu(nav, roomParam));
 // dev-only handles for live tuning / automated testing from the console
 if (import.meta.env.DEV) {
   Object.assign(window, { __r: renderer, __s: () => session, __room: () => room });
-  void import('./dev/autotest').then((m) => { m.installAutotest(() => session); m.installRaceTest(() => session); });
+  void import('./dev/autotest').then((m) => { m.installAutotest(() => session); m.installRaceTest(() => session); m.installStartTest(() => session); });
 }

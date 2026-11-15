@@ -92,3 +92,23 @@ export function installRaceTest(getSession: () => Session | null) {
     });
   };
 }
+
+/** `__startTest()`: checks cars stay put through the countdown, then all launch forward. */
+export function installStartTest(getSession: () => Session | null) {
+  (window as Any).__startTest = () => {
+    const S = getSession() as Any;
+    const cars: [string, Any][] = [['me', S.car], ...[...S.bots.entries()].map(([k, b]: Any) => [String(k), b.car] as [string, Any])];
+    const start = cars.map(([, c]) => c.position.clone());
+    const idle = () => ({ steer: 0, throttle: 1, brake: 0, shiftUp: false, shiftDown: false }); // player mashing throttle
+    let maxMove = 0, maxBack = 0;
+    for (let t = 0; t < 3.7; t += 0.1) {
+      S.devAdvance(0.1, idle);
+      cars.forEach(([, c], k) => { maxMove = Math.max(maxMove, c.position.distanceTo(start[k])); maxBack = Math.min(maxBack, c.telemetry.speed); });
+    }
+    const duringCountdown = { phase: S.race.phase, maxMove: +maxMove.toFixed(2), minSpeed: +maxBack.toFixed(2) };
+    S.devAdvance(8, idle);
+    const tr = S.map.track;
+    const after = cars.map(([k, c]) => `${k}:${Math.round(c.telemetry.speed * 2.237)}mph gear${c.telemetry.gear} moved${c.position.distanceTo(start[cars.findIndex(([kk]) => kk === k)]).toFixed(0)}m i${tr.nearest(c.position)}`);
+    return JSON.stringify({ duringCountdown, phaseAfter: S.race.phase, flag: S.race.flag, after, laps: S.race.st.map((s: Any) => s.lap) });
+  };
+}
