@@ -1,0 +1,328 @@
+import Peer, { type DataConnection } from 'peerjs';
+import { MAX_PLAYERS, peerIdForRoom } from './transport';
+import type { Profile } from '../core/profile';
+import type { DamageLevel } from '../damage/damage';
+
+export interface RoomSettings {
+  map: string;
+  laps: number; // 0 = free practice
+  damage: DamageLevel;
+  bots: number;
+  weather: 'dry' | 'rain';
+}
+
+export interface Player {
+  slot: number;
+  nickname: string;
+  number: number;
+  color: string;
+  ready: boolean;
+  isHost: boolean;
+  ping: number;
+  bot?: boolean;
+}
+
+type Msg =
+  | { t: 'hello'; nickname: string; number: number; color: string }
+  | { t: 'welcome'; slot: number; players: Player[]; settings: RoomSettings; inRace: boolean }
+  | { t: 'reject'; reason: string }
+  | { t: 'lobby'; players: Player[]; settings: RoomSettings }
+  | { t: 'ready'; ready: boolean }
+  | { t: 'chat'; f?: number; text: string }
+  | { t: 'ping'; ts: number }
+  | { t: 'pong'; ts: number }
+  | { t: 'ev'; e: string; p: unknown; f?: number };
+
+const PEER_OPTS = {
+  debug: 1,
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
+    ],
+  },
+};
+
+interface ClientLink {
+  slot: number;
+  ev: DataConnection;
+  st?: DataConnection;
+}
+
+/**
+ * A game room over PeerJS / WebRTC (star topology, the host relays).
+ * The host's peer id is derived from the room code, so joining only needs the code.
+ * PeerJS's free public broker is used just to exchange connection offers; game data then goes
+ * browser-to-browser. An `offline` room has the same API with no networking (solo races).
+ */
+export class Room {
+  players: Player[] = [];
+  settings: RoomSettings;
+  selfSlot = 0;
+  inRace = false;
+  closed = false;
+
+  onLobby: () => void = () => {};
+  onChat: (from: number, text: string) => void = () => {};
+  onEvent: (type: string, payload: unknown, from: number) => void = () => {};
+  onState: (buf: ArrayBuffer) => void = () => {};
+  onClosed: (reason: string) => void = () => {};
+
+  private peer?: Peer;
+  private links = new Map<string, ClientLink>(); // host: peerId → link
+  private pendingSt = new Map<string, DataConnection>(); // state channels that opened before the hello
+  private hostEv?: DataConnection; // client
+  private hostSt?: DataConnection; // client
+  private pingTimer = 0;
+
+  private constructor(readonly code: string, readonly isHost: boolean, readonly offline: boolean, settings: RoomSettings) {
+    this.settings = settings;
+  }
+
+  get self(): Player | undefined {
+    return this.players.find((p) => p.slot === this.selfSlot);
+  }
+  get humans() {
+    return this.players.filter((p) => !p.bot);
+  }
+
+  static offline(profile: Profile, settings: RoomSettings): Room {
+    const r = new Room('', true, true, settings);
+    r.players = [{ slot: 0, nickname: profile.nickname, number: profile.carNumber, color: profile.color, ready: true, isHost: true, ping: 0 }];
+    return r;
+  }
+
+  static host(profile: Profile, code: string, settings: RoomSettings): Promise<Room> {
+    return new Promise((resolve, reject) => {
+      const r = new Room(code, true, false, settings);
+      r.players = [{ slot: 0, nickname: profile.nickname, number: profile.carNumber, color: profile.color, ready: true, isHost: true, ping: 0 }];
+      const peer = new Peer(peerIdForRoom(code), PEER_OPTS);
+      r.peer = peer;
+      const timeout = setTimeout(() => { peer.destroy(); reject(new Error('Could not reach the matchmaking server. Check your connection.')); }, 15000);
+      peer.on('open', () => {
+        clearTimeout(timeout);
+        r.pingTimer = window.setInterval(() => { r.broadcast({ t: 'ping', ts: performance.now() }); if (!r.inRace) r.pushLobby(); }, 2000);
+        resolve(r);
+      });
+      peer.on('error', (err) => {
+        clearTimeout(timeout);
+        if (err.type === 'unavailable-id') reject(Object.assign(new Error('code-taken'), { code: 'taken' }));
+        else if (!r.closed && r.peer?.open) console.warn('peer error', err);
+        else reject(new Error(`Network error: ${err.type}`));
+      });
+      peer.on('disconnected', () => { if (!r.closed) peer.reconnect(); });
+      peer.on('connection', (conn) => r.acceptConnection(conn));
+    });
+  }
+
+  static join(profile: Profile, code: string): Promise<Room> {
+    return new Promise((resolve, reject) => {
+      const r = new Room(code, false, false, { map: 'sunvale', laps: 10, damage: 'realistic', bots: 0, weather: 'dry' });
+      const peer = new Peer(PEER_OPTS);
+      r.peer = peer;
+      let settled = false;
+      const fail = (msg: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        peer.destroy();
+        reject(new Error(msg));
+      };
+      const timeout = setTimeout(() => fail('Room not found, or the host could not be reached.'), 15000);
+      peer.on('error', (err) => {
+        if (err.type === 'peer-unavailable') fail('Room not found. Check the code.');
+        else if (!settled) fail(`Network error: ${err.type}`);
+        else console.warn('peer error', err);
+      });
+      peer.on('open', () => {
+        const hostId = peerIdForRoom(code);
+        const ev = peer.connect(hostId, { label: 'ev', reliable: true, serialization: 'json' });
+        const st = peer.connect(hostId, { label: 'st', reliable: false, serialization: 'raw' });
+        r.hostEv = ev;
+        r.hostSt = st;
+        st.on('data', (d) => { if (d instanceof ArrayBuffer) r.onState(d); });
+        ev.on('open', () => ev.send({ t: 'hello', nickname: profile.nickname, number: profile.carNumber, color: profile.color } satisfies Msg));
+        ev.on('data', (raw) => {
+          const m = raw as Msg;
+          if (m.t === 'welcome') {
+            r.selfSlot = m.slot;
+            r.players = m.players;
+            r.settings = m.settings;
+            r.inRace = m.inRace;
+            if (!settled) { settled = true; clearTimeout(timeout); resolve(r); }
+            return;
+          }
+          if (m.t === 'reject') return fail(m.reason);
+          r.handleFromHost(m);
+        });
+        ev.on('close', () => { if (settled && !r.closed) r.shutdown('The host left the room.'); });
+        ev.on('error', (e) => console.warn('conn error', e));
+      });
+    });
+  }
+
+  // ------------------------------------------------------------------ host side
+  private acceptConnection(conn: DataConnection) {
+    if (conn.label === 'st') {
+      conn.on('open', () => {
+        this.pendingSt.set(conn.peer, conn);
+        const link = this.links.get(conn.peer);
+        if (link) link.st = conn;
+      });
+      conn.on('data', (d) => {
+        if (!(d instanceof ArrayBuffer)) return;
+        const link = this.links.get(conn.peer);
+        if (!link || new Uint8Array(d)[0] !== link.slot) return; // a client may only send its own car
+        this.onState(d);
+        for (const [pid, l] of this.links) if (pid !== conn.peer) l.st?.send(d);
+      });
+      return;
+    }
+    conn.on('data', (raw) => {
+      const m = raw as Msg;
+      const link = this.links.get(conn.peer);
+      if (m.t === 'hello') {
+        if (this.humans.length >= MAX_PLAYERS) return this.rejectConn(conn, `Room full (max ${MAX_PLAYERS} players).`);
+        if (this.inRace) return this.rejectConn(conn, 'A race is in progress. Try again when it ends.');
+        const used = new Set(this.players.map((p) => p.slot));
+        let slot = 1;
+        while (used.has(slot)) slot++;
+        this.links.set(conn.peer, { slot, ev: conn, st: this.pendingSt.get(conn.peer) });
+        this.players.push({ slot, nickname: String(m.nickname).slice(0, 16), number: Number(m.number) | 0, color: String(m.color), ready: false, isHost: false, ping: 0 });
+        conn.send({ t: 'welcome', slot, players: this.players, settings: this.settings, inRace: this.inRace } satisfies Msg);
+        this.pushLobby();
+        this.onChat(-1, `${m.nickname} joined`);
+        return;
+      }
+      if (!link) return;
+      switch (m.t) {
+        case 'ready': {
+          const p = this.players.find((x) => x.slot === link.slot);
+          if (p) p.ready = !!m.ready;
+          this.pushLobby();
+          break;
+        }
+        case 'chat': {
+          const text = String(m.text).slice(0, 200);
+          this.broadcast({ t: 'chat', f: link.slot, text });
+          this.onChat(link.slot, text);
+          break;
+        }
+        case 'pong': {
+          const p = this.players.find((x) => x.slot === link.slot);
+          if (p) p.ping = Math.round(performance.now() - m.ts);
+          break;
+        }
+        case 'ev':
+          this.onEvent(m.e, m.p, link.slot);
+          for (const [pid, l] of this.links) if (pid !== conn.peer) l.ev.send({ t: 'ev', e: m.e, p: m.p, f: link.slot } satisfies Msg);
+          break;
+      }
+    });
+    conn.on('close', () => this.dropPeer(conn.peer));
+    conn.on('error', () => this.dropPeer(conn.peer));
+  }
+
+  private rejectConn(conn: DataConnection, reason: string) {
+    conn.send({ t: 'reject', reason } satisfies Msg);
+    setTimeout(() => conn.close(), 400);
+  }
+
+  private dropPeer(pid: string) {
+    const link = this.links.get(pid);
+    if (!link) return;
+    this.links.delete(pid);
+    this.pendingSt.delete(pid);
+    const p = this.players.find((x) => x.slot === link.slot);
+    this.players = this.players.filter((x) => x.slot !== link.slot);
+    this.pushLobby();
+    if (p) this.onChat(-1, `${p.nickname} left`);
+    this.onEvent('left', { slot: link.slot }, link.slot);
+    this.broadcast({ t: 'ev', e: 'left', p: { slot: link.slot }, f: 0 });
+  }
+
+  private broadcast(m: Msg) {
+    for (const l of this.links.values()) if (l.ev.open) l.ev.send(m);
+  }
+
+  pushLobby() {
+    if (!this.isHost) return;
+    // periodic pings are folded into lobby updates
+    this.broadcast({ t: 'lobby', players: this.players, settings: this.settings });
+    this.onLobby();
+  }
+
+  setSettings(s: Partial<RoomSettings>) {
+    if (!this.isHost) return;
+    Object.assign(this.settings, s);
+    this.pushLobby();
+  }
+
+  // ------------------------------------------------------------------ client side
+  private handleFromHost(m: Msg) {
+    switch (m.t) {
+      case 'lobby':
+        this.players = m.players;
+        this.settings = m.settings;
+        this.onLobby();
+        break;
+      case 'chat':
+        this.onChat(m.f ?? -1, m.text);
+        break;
+      case 'ping':
+        this.hostEv?.send({ t: 'pong', ts: m.ts } satisfies Msg);
+        break;
+      case 'ev':
+        this.onEvent(m.e, m.p, m.f ?? 0);
+        break;
+    }
+  }
+
+  // ------------------------------------------------------------------ shared
+  setReady(ready: boolean) {
+    const me = this.self;
+    if (me) me.ready = ready;
+    if (this.isHost) this.pushLobby();
+    else this.hostEv?.send({ t: 'ready', ready } satisfies Msg);
+  }
+
+  chat(text: string) {
+    text = text.trim().slice(0, 200);
+    if (!text) return;
+    if (this.isHost) {
+      this.broadcast({ t: 'chat', f: this.selfSlot, text });
+      this.onChat(this.selfSlot, text);
+    } else this.hostEv?.send({ t: 'chat', text } satisfies Msg);
+  }
+
+  /** Reliable game event to everyone else. */
+  sendEvent(e: string, p: unknown) {
+    if (this.offline) return;
+    if (this.isHost) this.broadcast({ t: 'ev', e, p, f: this.selfSlot });
+    else if (this.hostEv?.open) this.hostEv.send({ t: 'ev', e, p } satisfies Msg);
+  }
+
+  /** Unreliable car snapshot (first byte = slot). */
+  sendState(buf: ArrayBuffer) {
+    if (this.offline) return;
+    if (this.isHost) { for (const l of this.links.values()) if (l.st?.open) l.st.send(buf); }
+    else if (this.hostSt?.open) this.hostSt.send(buf);
+  }
+
+  pingOf(slot: number) {
+    return this.players.find((p) => p.slot === slot)?.ping ?? 0;
+  }
+
+  private shutdown(reason: string) {
+    if (this.closed) return;
+    this.closed = true;
+    clearInterval(this.pingTimer);
+    this.peer?.destroy();
+    this.onClosed(reason);
+  }
+
+  close() {
+    this.shutdown('left');
+  }
+}

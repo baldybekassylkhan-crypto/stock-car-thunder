@@ -1,0 +1,100 @@
+import * as THREE from 'three';
+
+export type CamMode = 'chase' | 'far' | 'hood' | 'cockpit' | 'tv';
+export const CAM_MODES: CamMode[] = ['chase', 'far', 'hood', 'cockpit', 'tv'];
+export const CAM_LABEL: Record<CamMode, string> = { chase: 'Chase', far: 'Far chase', hood: 'Hood', cockpit: 'Cockpit', tv: 'TV' };
+
+const _t = new THREE.Vector3();
+const _f = new THREE.Vector3();
+const _u = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+
+export class CameraRig {
+  mode: CamMode = 'chase';
+  private pos = new THREE.Vector3();
+  private look = new THREE.Vector3();
+  private heading = new THREE.Vector3(0, 0, 1);
+  private shake = 0;
+  private init = false;
+
+  /** Optional occlusion test: distance from `from` toward `dir` until track geometry (or Infinity). */
+  occlusion?: (from: THREE.Vector3, dir: THREE.Vector3, max: number) => number;
+
+  constructor(private cam: THREE.PerspectiveCamera, private tvCams: THREE.Vector3[]) {}
+
+  next() {
+    this.mode = CAM_MODES[(CAM_MODES.indexOf(this.mode) + 1) % CAM_MODES.length];
+    this.init = false;
+  }
+
+  addShake(a: number) {
+    this.shake = Math.min(1, this.shake + a);
+  }
+
+  update(dt: number, target: THREE.Object3D, speed: number) {
+    const cam = this.cam;
+    target.getWorldQuaternion(_q);
+    _f.set(0, 0, 1).applyQuaternion(_q);
+    _u.set(0, 1, 0).applyQuaternion(_q);
+    target.getWorldPosition(_t);
+    const sp = Math.abs(speed);
+
+    if (this.mode === 'chase' || this.mode === 'far') {
+      const far = this.mode === 'far';
+      // heading follows the car's horizontal forward with lag (looks great in slides)
+      const flat = _f.clone().setY(0).normalize();
+      if (!this.init) this.heading.copy(flat);
+      this.heading.lerp(flat, 1 - Math.exp(-dt * (far ? 4 : 6))).normalize();
+      const dist = (far ? 10.5 : 7.2) + Math.min(sp, 90) * 0.012;
+      const height = far ? 3.4 : 2.25;
+      const want = _t.clone().addScaledVector(this.heading, -dist).add(new THREE.Vector3(0, height, 0));
+      if (!this.init) { this.pos.copy(want); this.init = true; }
+      this.pos.lerp(want, 1 - Math.exp(-dt * 12));
+      // keep the camera on the car's side of walls / fences
+      if (this.occlusion) {
+        const from = _t.clone().add(new THREE.Vector3(0, 1.2, 0));
+        const dir = this.pos.clone().sub(from);
+        const len = dir.length();
+        dir.divideScalar(len || 1);
+        const hit = this.occlusion(from, dir, len);
+        if (hit < len) this.pos.copy(from).addScaledVector(dir, Math.max(0.5, hit - 0.35));
+      }
+      const lookAt = _t.clone().addScaledVector(this.heading, 4).add(new THREE.Vector3(0, 1.0, 0));
+      this.look.copy(lookAt);
+      cam.position.copy(this.pos);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(this.look);
+      cam.fov = THREE.MathUtils.lerp(58, 72, Math.min(sp / 90, 1));
+    } else if (this.mode === 'hood' || this.mode === 'cockpit') {
+      const local = this.mode === 'hood' ? new THREE.Vector3(0, 1.22, 1.0) : new THREE.Vector3(0.3, 1.12, -0.45);
+      cam.position.copy(local.applyQuaternion(_q).add(_t));
+      cam.up.copy(_u);
+      cam.lookAt(cam.position.clone().addScaledVector(_f, 20).addScaledVector(_u, this.mode === 'hood' ? -0.6 : -0.9));
+      cam.fov = this.mode === 'hood' ? 70 : 75;
+      this.init = false;
+    } else {
+      // TV: nearest trackside camera, zoom by distance
+      let best = this.tvCams[0];
+      let bd = Infinity;
+      for (const c of this.tvCams) { const d = c.distanceToSquared(_t); if (d < bd) { bd = d; best = c; } }
+      cam.position.copy(best);
+      cam.up.set(0, 1, 0);
+      this.look.lerp(_t, this.init ? 1 - Math.exp(-dt * 10) : 1);
+      this.init = true;
+      cam.lookAt(this.look);
+      cam.fov = THREE.MathUtils.clamp(2400 / Math.sqrt(bd), 6, 60);
+    }
+
+    if (this.shake > 0.001) {
+      const s = this.shake * 0.12;
+      cam.position.add(new THREE.Vector3((Math.random() - 0.5) * s, (Math.random() - 0.5) * s, (Math.random() - 0.5) * s));
+      this.shake *= Math.exp(-dt * 6);
+    }
+    // high-speed buffeting
+    if (this.mode !== 'tv' && sp > 50) {
+      const b = (sp - 50) * 0.00025;
+      cam.position.y += (Math.random() - 0.5) * b;
+    }
+    cam.updateProjectionMatrix();
+  }
+}
