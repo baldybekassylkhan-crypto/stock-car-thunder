@@ -27,5 +27,8 @@ export interface NetTransport {
   close(): void;
 }
 
-export const MAX_PLAYERS = 10;
+/** Human players per room (host included). */
+export const MAX_HUMANS = 12;
+/** Cars on the grid: humans plus AI drivers. */
+export const MAX_GRID = 32;
 export const peerIdForRoom = (code: string) => `sct-room-${code}`;

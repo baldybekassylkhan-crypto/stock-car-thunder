@@ -174,8 +174,8 @@ export class Hud {
     const key = s.tower.map((r) => `${r.pos}|${r.number}|${r.gap}|${r.status}|${r.self}`).join(';');
     if (key !== this.towerKey) {
       this.towerKey = key;
-      e.tower.innerHTML = s.tower
-        .map((r) => `<div class="trow ${r.self ? 'me' : ''} ${r.status === 2 ? 'dnf' : ''}"><span class="tp">${r.pos}</span><span class="tn" style="background:${r.color}">${r.number}</span><span class="tname">${escapeHtml(r.name)}</span><span class="tg">${r.status === 2 ? 'OUT' : r.status === 1 ? '🏁' : r.gap}</span></div>`)
+      e.tower.innerHTML = compactTower(s.tower)
+        .map((r) => r === null ? '<div class="trow gap">⋯</div>' : `<div class="trow ${r.self ? 'me' : ''} ${r.status === 2 ? 'dnf' : ''}"><span class="tp">${r.pos}</span><span class="tn" style="background:${r.color}">${r.number}</span><span class="tname">${escapeHtml(r.name)}</span><span class="tg">${r.status === 2 ? 'OUT' : r.status === 1 ? '🏁' : r.gap}</span></div>`)
         .join('');
     }
 
@@ -193,6 +193,25 @@ export class Hud {
       ctx.lineWidth = 3; ctx.strokeStyle = m.self ? '#ffcc00' : '#000'; ctx.stroke();
     }
   }
+}
+
+/** Big grids: the top 5, then the cars around the player (±3), with gap markers in between. */
+const TOWER_FULL = 12;
+function compactTower(rows: TowerRow[]): (TowerRow | null)[] {
+  if (rows.length <= TOWER_FULL) return rows;
+  const me = Math.max(0, rows.findIndex((r) => r.self));
+  const keep = new Set<number>();
+  for (let i = 0; i < 5; i++) keep.add(i);
+  for (let i = Math.max(0, me - 3); i <= Math.min(rows.length - 1, me + 3); i++) keep.add(i);
+  const out: (TowerRow | null)[] = [];
+  let last = -1;
+  for (const i of [...keep].sort((a, b) => a - b)) {
+    if (i !== last + 1) out.push(null);
+    out.push(rows[i]);
+    last = i;
+  }
+  if (last < rows.length - 1) out.push(null);
+  return out;
 }
 
 function escapeHtml(s: string) {

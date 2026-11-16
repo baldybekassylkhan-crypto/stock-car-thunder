@@ -4,7 +4,7 @@ import { Session, type GridEntry } from './core/session';
 import { profile, settings, makeRoomCode } from './core/profile';
 import { Room, type RoomSettings } from './net/room';
 import { MAPS } from './tracks/maps';
-import { MAX_PLAYERS } from './net/transport';
+import { MAX_GRID } from './net/transport';
 import {
   nicknameScreen, mainMenu, loadingScreen, pauseScreen, garageScreen, clearUI, lobbyScreen, resultsScreen,
   messageScreen, resetChat, BOT_NAMES, type Nav,
@@ -20,7 +20,11 @@ let room: Room | null = null;
 const roomParam = new URLSearchParams(location.search).get('room') ?? undefined;
 
 const DEFAULT_SETTINGS = (): RoomSettings => ({ map: 'sunvale', laps: 10, damage: 'realistic', bots: 5, weather: 'dry' });
-const BOT_COLORS = ['#2b7de9', '#e9472b', '#14b48c', '#f0a020', '#9b3de0', '#e0e0e0', '#1a1a1a', '#e83e8c', '#5bc0eb', '#8bc34a'];
+const BOT_COLORS = [
+  '#2b7de9', '#e9472b', '#14b48c', '#f0a020', '#9b3de0', '#e0e0e0', '#1a1a1a', '#e83e8c', '#5bc0eb', '#8bc34a',
+  '#ff7f11', '#0b3d91', '#c81d25', '#2ec4b6', '#ffd23f', '#6a4c93', '#3a3a3a', '#f15bb5', '#00bbf9', '#9ef01a',
+  '#8d5524', '#1b998b', '#d7263d', '#f46036', '#2e294e', '#c5d86d', '#4f6d7a', '#ff99c8', '#e4572e', '#76b041', '#a0a4b8',
+];
 
 function endSession() {
   session?.dispose();
@@ -84,12 +88,17 @@ function buildGrid(r: Room): GridEntry[] {
   const humans = r.humans.map((p) => ({ slot: p.slot, nickname: p.nickname, number: p.number, color: p.color, bot: false }));
   const used = new Set(humans.map((h) => h.slot));
   const bots: GridEntry[] = [];
-  const count = Math.min(r.settings.bots, MAX_PLAYERS - humans.length);
+  const count = Math.min(r.settings.bots, MAX_GRID - humans.length);
+  // AI car numbers: unique and never the same as a human's number
+  const takenNumbers = new Set(humans.map((h) => h.number));
+  const numbers: number[] = [];
+  for (let n = 1; numbers.length < count && n < 100; n += 1 + ((n * 7) % 5)) if (!takenNumbers.has(n)) numbers.push(n);
+  for (let n = 1; numbers.length < count && n < 100; n++) if (!takenNumbers.has(n) && !numbers.includes(n)) numbers.push(n);
   let slot = 0;
   for (let i = 0; i < count; i++) {
     while (used.has(slot)) slot++;
     used.add(slot);
-    bots.push({ slot, nickname: BOT_NAMES[i % BOT_NAMES.length], number: [3, 7, 11, 19, 24, 42, 48, 66, 77, 88][i % 10], color: BOT_COLORS[i % BOT_COLORS.length], bot: true });
+    bots.push({ slot, nickname: BOT_NAMES[i % BOT_NAMES.length], number: numbers[i], color: BOT_COLORS[i % BOT_COLORS.length], bot: true });
   }
   const all = [...humans, ...bots];
   for (let i = all.length - 1; i > 0; i--) {

@@ -1,7 +1,8 @@
 import Peer, { type DataConnection } from 'peerjs';
-import { MAX_PLAYERS, peerIdForRoom } from './transport';
+import { MAX_HUMANS, peerIdForRoom } from './transport';
 import type { Profile } from '../core/profile';
 import type { DamageLevel } from '../damage/damage';
+import { encodeBatch, splitPacket, statePos } from './codec';
 
 export interface RoomSettings {
   map: string;
@@ -48,7 +49,17 @@ interface ClientLink {
   slot: number;
   ev: DataConnection;
   st?: DataConnection;
+  /** Version of each car's state last sent to this client (only changes are sent). */
+  sent: Map<number, number>;
 }
+
+/** Cars closer than this to a client's own car get every snapshot; farther ones every FAR_EVERY-th. */
+const NEAR_M = 220;
+const FAR_EVERY = 3;
+/** States per batch packet, kept small enough to avoid fragmenting on the unreliable channel. */
+const BATCH_MAX = 24;
+/** Relay entries older than this (s) are stale (car gone, previous race) and are not sent. */
+const STALE_S = 1.5;
 
 /**
  * A game room over PeerJS / WebRTC (star topology, the host relays).
@@ -75,6 +86,10 @@ export class Room {
   private hostEv?: DataConnection; // client
   private hostSt?: DataConnection; // client
   private pingTimer = 0;
+  // host relay: latest snapshot per car slot
+  private relay = new Map<number, { buf: ArrayBuffer; ver: number; t: number }>();
+  private relayVer = 0;
+  private relayTick = 0;
 
   private constructor(readonly code: string, readonly isHost: boolean, readonly offline: boolean, settings: RoomSettings) {
     this.settings = settings;
@@ -141,7 +156,7 @@ export class Room {
         const st = peer.connect(hostId, { label: 'st', reliable: false, serialization: 'raw' });
         r.hostEv = ev;
         r.hostSt = st;
-        st.on('data', (d) => { if (d instanceof ArrayBuffer) r.onState(d); });
+        st.on('data', (d) => { if (d instanceof ArrayBuffer) for (const b of splitPacket(d)) r.onState(b); });
         ev.on('open', () => ev.send({ t: 'hello', nickname: profile.nickname, number: profile.carNumber, color: profile.color } satisfies Msg));
         ev.on('data', (raw) => {
           const m = raw as Msg;
@@ -174,8 +189,8 @@ export class Room {
         if (!(d instanceof ArrayBuffer)) return;
         const link = this.links.get(conn.peer);
         if (!link || new Uint8Array(d)[0] !== link.slot) return; // a client may only send its own car
+        this.storeRelay(link.slot, d);
         this.onState(d);
-        for (const [pid, l] of this.links) if (pid !== conn.peer) l.st?.send(d);
       });
       return;
     }
@@ -183,12 +198,12 @@ export class Room {
       const m = raw as Msg;
       const link = this.links.get(conn.peer);
       if (m.t === 'hello') {
-        if (this.humans.length >= MAX_PLAYERS) return this.rejectConn(conn, `Room full (max ${MAX_PLAYERS} players).`);
+        if (this.humans.length >= MAX_HUMANS) return this.rejectConn(conn, `Room full (max ${MAX_HUMANS} players).`);
         if (this.inRace) return this.rejectConn(conn, 'A race is in progress. Try again when it ends.');
         const used = new Set(this.players.map((p) => p.slot));
         let slot = 1;
         while (used.has(slot)) slot++;
-        this.links.set(conn.peer, { slot, ev: conn, st: this.pendingSt.get(conn.peer) });
+        this.links.set(conn.peer, { slot, ev: conn, st: this.pendingSt.get(conn.peer), sent: new Map() });
         this.players.push({ slot, nickname: String(m.nickname).slice(0, 16), number: Number(m.number) | 0, color: String(m.color), ready: false, isHost: false, ping: 0 });
         conn.send({ t: 'welcome', slot, players: this.players, settings: this.settings, inRace: this.inRace } satisfies Msg);
         this.pushLobby();
@@ -234,6 +249,7 @@ export class Room {
     if (!link) return;
     this.links.delete(pid);
     this.pendingSt.delete(pid);
+    this.relay.delete(link.slot);
     const p = this.players.find((x) => x.slot === link.slot);
     this.players = this.players.filter((x) => x.slot !== link.slot);
     this.pushLobby();
@@ -303,11 +319,44 @@ export class Room {
     else if (this.hostEv?.open) this.hostEv.send({ t: 'ev', e, p } satisfies Msg);
   }
 
-  /** Unreliable car snapshot (first byte = slot). */
-  sendState(buf: ArrayBuffer) {
+  private storeRelay(slot: number, buf: ArrayBuffer) {
+    this.relay.set(slot, { buf, ver: ++this.relayVer, t: performance.now() / 1000 });
+  }
+
+  /**
+   * Unreliable car snapshots for the cars this peer simulates (first byte = slot). A client sends
+   * its own car to the host. The host batches its cars plus the latest state of every client into
+   * one packet per client per tick: only changed cars, and far-away cars at a lower rate.
+   */
+  sendStates(bufs: ArrayBuffer[]) {
     if (this.offline) return;
-    if (this.isHost) { for (const l of this.links.values()) if (l.st?.open) l.st.send(buf); }
-    else if (this.hostSt?.open) this.hostSt.send(buf);
+    if (!this.isHost) {
+      if (this.hostSt?.open) for (const b of bufs) this.hostSt.send(b);
+      return;
+    }
+    for (const b of bufs) this.storeRelay(new Uint8Array(b)[0], b);
+    const now = performance.now() / 1000;
+    const tick = this.relayTick++;
+    let k = 0;
+    for (const l of this.links.values()) {
+      k++;
+      if (!l.st?.open) continue;
+      const me = this.relay.get(l.slot);
+      const mp = me ? statePos(me.buf) : null;
+      const out: ArrayBuffer[] = [];
+      for (const [slot, e] of this.relay) {
+        if (slot === l.slot || l.sent.get(slot) === e.ver || now - e.t > STALE_S) continue;
+        if (mp) {
+          const p = statePos(e.buf);
+          const far = Math.hypot(p[0] - mp[0], p[1] - mp[1], p[2] - mp[2]) > NEAR_M;
+          // spread far updates over ticks so packets stay even
+          if (far && (tick + k + slot) % FAR_EVERY !== 0) continue;
+        }
+        l.sent.set(slot, e.ver);
+        out.push(e.buf);
+      }
+      for (let i = 0; i < out.length; i += BATCH_MAX) l.st.send(encodeBatch(out.slice(i, i + BATCH_MAX)));
+    }
   }
 
   pingOf(slot: number) {

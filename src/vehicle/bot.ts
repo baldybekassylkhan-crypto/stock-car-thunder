@@ -29,6 +29,9 @@ export class BotDriver {
   private laneTarget: number;
   private passTimer = 0;
   private stuckT = 0;
+  /** Progress watchdog: a car grinding along a wall can show wheel speed but go nowhere. */
+  private progT = 0;
+  private progI = -1;
   /** Smoothed throttle: no snapping off the gas mid-corner (lift-off oversteer). */
   private thr = 0;
   wantsReset = false;
@@ -39,10 +42,14 @@ export class BotDriver {
     this.laneTarget = this.lane;
   }
 
-  private maxSpeedAt(i: number): number {
+  /** Corner speed at sample i for a car at lateral offset `lane` (inside lanes are tighter turns). */
+  private maxSpeedAt(i: number, lane = this.track.width / 2): number {
     const tr = this.track;
-    const k = Math.abs(tr.curvature[tr.wrap(i)]);
-    if (k < 1e-4) return 200;
+    const kc = tr.curvature[tr.wrap(i)];
+    if (Math.abs(kc) < 1e-4) return 200;
+    // lateral offsets run from the inner (left) edge: left turns tighten toward d = 0, right turns toward the wall
+    const inward = (kc > 0 ? 1 : -1) * (tr.width / 2 - lane);
+    const k = 1 / Math.max(5, 1 / Math.abs(kc) - inward);
     const th = Math.abs(tr.bank[tr.wrap(i)]);
     const mu = (this.oval ? 1.05 : 0.98) * this.skill * this.car.gripScale;
     const tan = Math.tan(th);
@@ -131,11 +138,19 @@ export class BotDriver {
     const steer = THREE.MathUtils.clamp(ang / lock, -1, 1);
 
     // ---------------- speed ----------------
+    // in a pack (car alongside or right ahead) leave some grip in hand for bumps and dirty air
+    const crowded = traffic.some((o) => {
+      let di = o.i - i;
+      if (di < -tr.n / 2) di += tr.n;
+      if (di > tr.n / 2) di -= tr.n;
+      const along = di * tr.ds;
+      return along > -6 && along < 14 && Math.abs(o.d - d) < 4;
+    });
     let vT = Infinity;
     const horizon = Math.min(tr.n / 3, Math.round(260 / tr.ds));
     for (let j = 0; j < horizon; j += 2) {
       const dist = j * tr.ds;
-      const v = Math.sqrt(this.maxSpeedAt(i + j) ** 2 + 2 * (this.oval ? 8.5 : 7) * this.skill * this.car.gripScale * dist);
+      const v = Math.sqrt((this.maxSpeedAt(i + j, target) * (crowded ? 0.97 : 1)) ** 2 + 2 * (this.oval ? 8.5 : 7) * this.skill * this.car.gripScale * dist);
       vT = Math.min(vT, v);
     }
     vT *= 0.97 + 0.03 * this.skill;
@@ -155,16 +170,36 @@ export class BotDriver {
     const err = vT - sp;
     let throttle = THREE.MathUtils.clamp(err * 0.5, 0, 1);
     let brake = THREE.MathUtils.clamp(-err * 0.22, 0, 1);
+    // trail braking: the tighter the corner is already loading the tyres, the less brake is left
+    const vCorner = this.maxSpeedAt(i, d);
+    const latUse = THREE.MathUtils.clamp((sp * sp) / (vCorner * vCorner), 0, 1);
+    brake = Math.min(brake, Math.max(0.25, 1 - latUse * 0.8));
     if (Math.abs(sp) < 3 && raceSpeedLimit > 1) { throttle = 1; brake = 0; }
+    // sliding (rotating faster than the corner): no power until it's caught, or it spins
+    const slide = Math.abs(yawErr);
+    if (slide > 0.08) throttle = Math.min(throttle, THREE.MathUtils.clamp(1 - (slide - 0.08) * 6, 0.15, 1));
     // ease off the gas instead of snapping shut, unless we need the brakes
     if (brake > 0.05) this.thr = 0;
-    else this.thr = throttle < this.thr ? Math.max(throttle, this.thr - dt * 2.5) : throttle;
+    else this.thr = throttle < this.thr ? Math.max(throttle, this.thr - dt * (slide > 0.08 ? 6 : 2.5)) : throttle;
     throttle = this.thr;
 
     // stuck detection → ask for a reset
     if (raceSpeedLimit > 5 && Math.abs(sp) < 2 && !car.damage.destroyed && car.damage.engineWear < 1) this.stuckT += dt;
     else this.stuckT = 0;
-    if (this.stuckT > 4) { this.wantsReset = true; this.stuckT = 0; }
+    // reset before race control would throw a caution for a stopped car (3 s)
+    if (this.stuckT > 2) { this.wantsReset = true; this.stuckT = 0; }
+    if (raceSpeedLimit > 5 && !car.damage.destroyed && car.damage.engineWear < 1) {
+      if (this.progI < 0) this.progI = i;
+      this.progT += dt;
+      if (this.progT > 2.5) {
+        let di = i - this.progI;
+        if (di < -tr.n / 2) di += tr.n;
+        if (di > tr.n / 2) di -= tr.n;
+        this.progT = 0;
+        this.progI = i;
+        if (di * tr.ds < 4) { this.wantsReset = true; this.progI = -1; }
+      }
+    } else { this.progT = 0; this.progI = -1; }
 
     return { steer, throttle, brake, shiftUp: false, shiftDown: false };
   }

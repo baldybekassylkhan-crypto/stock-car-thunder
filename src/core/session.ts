@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LOD_DISTANCE, updateLod } from '../vehicle/carLod';
 import { Renderer } from '../render/renderer';
 import { PhysicsWorld, initPhysics, RAPIER, RAY_TRACK_ONLY } from '../physics/world';
 import { Car, type CarContact } from '../vehicle/car';
@@ -14,7 +15,7 @@ import { LapProgress } from './progress';
 import { readDriverInput, wasPressed, clearPressed, resetHeld, readMouseLook, RESET_HOLD, type DriverInput } from './input';
 import { settings } from './profile';
 import { encodeState, decodeState } from '../net/codec';
-import { RaceDirector, type RaceSnapshot, type ResultRow } from '../race/race';
+import { RaceDirector, easeLimit, type RaceSnapshot, type ResultRow } from '../race/race';
 import { PART_NAMES, type PartName, type CarVisual } from '../vehicle/carModel';
 import type { LoadedMap, MapDef } from '../tracks/maps';
 import type { Room, RoomSettings } from '../net/room';
@@ -33,7 +34,7 @@ export interface SessionCallbacks {
   onExit: () => void;
 }
 
-interface BotEntry { car: Car; ai: BotDriver; input: DriverInput; penalty: number }
+interface BotEntry { car: Car; ai: BotDriver; input: DriverInput; penalty: number; limit: number }
 interface DentMsg { l: number[]; d: number[]; m: number }
 
 const ENGINE_BAY = new THREE.Vector3(0, 0.85, 1.7);
@@ -41,6 +42,9 @@ const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 
 /** One race (or free practice) on one map, for every kind of participant. */
+/** Bots farther than this from every human re-plan at half rate. */
+const FAR_BOT_M = 300;
+
 export class Session {
   physics!: PhysicsWorld;
   map!: LoadedMap;
@@ -132,7 +136,7 @@ export class Session {
       } else if (g.bot && this.isHost) {
         const car = this.makeCar(opts, pl.pos, pl.quat);
         const skill = 0.9 + ((g.slot * 37) % 10) / 100;
-        this.bots.set(g.slot, { car, ai: new BotDriver(car, tr, skill, this.map.oval, g.slot), input: { steer: 0, throttle: 0, brake: 0, shiftUp: false, shiftDown: false }, penalty: 0 });
+        this.bots.set(g.slot, { car, ai: new BotDriver(car, tr, skill, this.map.oval, g.slot), input: { steer: 0, throttle: 0, brake: 0, shiftUp: false, shiftDown: false }, penalty: 0, limit: 0 });
       } else {
         const rc = new RemoteCar(this.physics, g.slot, opts, pl.pos, pl.quat);
         this.remotes.set(g.slot, rc);
@@ -517,10 +521,16 @@ export class Session {
       this.emitAcc.set(key, a - n);
       while (n-- > 0) fn();
     };
-    if (smoke > 0.15) rate(`s${slot}`, 6 + smoke * 30, () => this.effects.smoke(bay, vel, smoke));
+    // particle budget: full detail close to the camera, less far away and with big grids
+    const camD = this.r.camera.position.distanceTo(v.root.position);
+    const near = THREE.MathUtils.clamp(1 - (camD - 60) / 160, 0.2, 1);
+    const crowd = Math.min(1, 14 / (1 + this.bots.size + this.remotes.size));
+    const minor = near * crowd; // tyre smoke, dust, spray
+    const major = Math.max(0.35, near); // damage smoke and fire stay visible from afar
+    if (smoke > 0.15) rate(`s${slot}`, (6 + smoke * 30) * major, () => this.effects.smoke(bay, vel, smoke));
     if (fire > 0.01) {
-      rate(`f${slot}`, 20 + fire * 70, () => this.effects.fire(bay.clone().add(_v.set((Math.random() - 0.5) * 1.4, 0, (Math.random() - 0.5) * 3 * fire)), vel, 0.6 + fire));
-      rate(`fs${slot}`, 8 + fire * 12, () => this.effects.smoke(bay.clone().add(_v.set(0, 1, 0)), vel, 1));
+      rate(`f${slot}`, (20 + fire * 70) * major, () => this.effects.fire(bay.clone().add(_v.set((Math.random() - 0.5) * 1.4, 0, (Math.random() - 0.5) * 3 * fire)), vel, 0.6 + fire));
+      rate(`fs${slot}`, (8 + fire * 12) * major, () => this.effects.smoke(bay.clone().add(_v.set(0, 1, 0)), vel, 1));
     }
     if (wheels) {
       wheels.forEach((w, i) => {
@@ -530,15 +540,15 @@ export class Session {
         const sliding = w.slip > 1.05 || w.locked;
         if (sliding && (w.surface === 'asphalt' || w.surface === 'concrete' || w.surface === 'curb')) {
           this.effects.skids.add(key, w.point, _v.set(0, 1, 0), Math.min(1, w.slip - 0.8));
-          if (!this.map.rain) rate(`t${key}`, 25 * Math.min(2, w.slip - 0.9), () => this.effects.tireSmoke(w.point, vel, Math.min(1.5, w.slip - 0.8)));
+          if (!this.map.rain) rate(`t${key}`, 25 * Math.min(2, w.slip - 0.9) * minor, () => this.effects.tireSmoke(w.point, vel, Math.min(1.5, w.slip - 0.8)));
         } else this.effects.skids.lift(key);
         if ((w.surface === 'grass' || w.surface === 'gravel' || w.surface === 'sand') && speed > 6) {
-          rate(`d${key}`, Math.min(40, speed), () => this.effects.dust(w.point, vel, w.surface === 'grass' ? 0x6f7c4e : 0xb8a684));
+          rate(`d${key}`, Math.min(40, speed) * minor, () => this.effects.dust(w.point, vel, w.surface === 'grass' ? 0x6f7c4e : 0xb8a684));
         }
       });
     }
     if (this.map.rain && speed > 15) {
-      rate(`r${slot}`, Math.min(60, speed * 0.8), () => {
+      rate(`r${slot}`, Math.min(60, speed * 0.8) * minor, () => {
         const rear = _v.set((Math.random() - 0.5) * 1.6, 0.2, -2.4).applyMatrix4(v.root.matrixWorld).clone();
         this.effects.spray(rear, vel, speed);
       });
@@ -547,9 +557,10 @@ export class Session {
 
   // ====================================================================== state out
   private sendStates() {
+    const out: ArrayBuffer[] = [];
     const pack = (slot: number, car: Car) => {
       const t = car.body.translation(), r = car.body.rotation(), lv = car.body.linvel();
-      this.room.sendState(encodeState({
+      out.push(encodeState({
         slot,
         pos: [t.x, t.y, t.z], quat: [r.x, r.y, r.z, r.w], vel: [lv.x, lv.y, lv.z],
         steer: car.telemetry.steer,
@@ -569,6 +580,7 @@ export class Session {
     };
     pack(this.self, this.car);
     for (const [s, b] of this.bots) pack(s, b.car);
+    this.room.sendStates(out);
   }
 
   // ====================================================================== frame
@@ -638,7 +650,8 @@ export class Session {
     const input = this.paused ? { steer: 0, throttle: 0, brake: 0.3, shiftUp: false, shiftDown: false } : auto ? auto(this) : interactive ? readDriverInput(dt, Math.abs(this.car.telemetry.speed)) : { steer: 0, throttle: 0, brake: 0, shiftUp: false, shiftDown: false };
     if (this.penalty > 0) this.penalty -= dt;
     this.car.inputLocked = limit === 0 || this.penalty > 0;
-    this.car.speedLimit = limit;
+    this.carLimit = easeLimit(this.carLimit, limit, this.car.telemetry.speed, dt);
+    this.car.speedLimit = this.carLimit;
     this.driveBots(dt, limit);
     this.computeDraft();
 
@@ -732,6 +745,12 @@ export class Session {
     this.r.followShadow(focus);
     this.map.update?.(dt, this.r.camera);
     this.effects.update(dt, this.r.camera, this.r.renderer.domElement.clientHeight);
+    // far cars switch to a single merged mesh (32 full cars would be ~2,700 draw calls)
+    const lodDist = LOD_DISTANCE[settings.quality] ?? 70;
+    const cam = this.r.camera.position;
+    for (const b of this.bots.values()) updateLod(b.car.visual, cam.distanceTo(b.car.position), lodDist);
+    for (const rc of this.remotes.values()) updateLod(rc.visual, cam.distanceTo(rc.pos), lodDist);
+    if (this.car) updateLod(this.car.visual, cam.distanceTo(this.car.position), lodDist);
     const tm = this.car.telemetry;
     if (this.audio) {
       this.audio.damage = 1 - this.car.damage.engine;
@@ -743,21 +762,41 @@ export class Session {
     if (interactive) this.updateHud(tm);
   }
 
+  private trafficHint = new Map<number, number>();
+  /** Player's eased race speed limit (see easeLimit). */
+  private carLimit = 0;
+  private botFrame = 0;
+
   private driveBots(dt: number, limit: number) {
     if (!this.bots.size) return;
     const tr = this.map.track;
     const traffic: Traffic[] = [];
-    const addT = (pos: THREE.Vector3, vel: THREE.Vector3, dead: boolean) => { const i = tr.nearest(pos); traffic.push({ pos, vel, i, d: tr.lateral(pos, i), dead: dead || (this.race.phase === 'green' && vel.length() < 3) }); };
+    // nearest-sample search seeded with each car's last index (a full scan per car per frame adds up with 32 cars)
+    const addT = (slot: number, pos: THREE.Vector3, vel: THREE.Vector3, dead: boolean) => {
+      const i = tr.nearest(pos, this.trafficHint.get(slot) ?? -1, 30);
+      this.trafficHint.set(slot, i);
+      traffic.push({ pos, vel, i, d: tr.lateral(pos, i), dead: dead || (this.race.phase === 'green' && vel.length() < 3) });
+    };
     const lv = this.car.body.linvel();
-    addT(this.car.position.clone(), new THREE.Vector3(lv.x, lv.y, lv.z), this.car.damage.destroyed);
-    for (const [s, rc] of this.remotes) addT(rc.pos.clone(), rc.vel.clone(), this.destroyedOf(s));
-    for (const b of this.bots.values()) { const bv = b.car.body.linvel(); addT(b.car.position.clone(), new THREE.Vector3(bv.x, bv.y, bv.z), b.car.damage.destroyed); }
+    addT(this.self, this.car.position.clone(), new THREE.Vector3(lv.x, lv.y, lv.z), this.car.damage.destroyed);
+    for (const [s, rc] of this.remotes) addT(s, rc.pos.clone(), rc.vel.clone(), this.destroyedOf(s));
+    for (const [s, b] of this.bots) { const bv = b.car.body.linvel(); addT(s, b.car.position.clone(), new THREE.Vector3(bv.x, bv.y, bv.z), b.car.damage.destroyed); }
+    // humans: bots far from all of them re-plan every other frame (nobody is close enough to notice)
+    const humans = [this.car.position, ...[...this.remotes.entries()].filter(([s]) => !this.grid.find((g) => g.slot === s)?.bot).map(([, rc]) => rc.pos)];
+    this.botFrame++;
     for (const [slot, b] of this.bots) {
+      const far = humans.every((h) => h.distanceToSquared(b.car.position) > FAR_BOT_M * FAR_BOT_M);
+      b.limit = easeLimit(b.limit, limit, b.car.telemetry.speed, dt);
+      if (far && limit > 0 && (this.botFrame + slot) % 2 === 1 && !b.ai.wantsReset) {
+        if (b.penalty > 0) b.penalty -= dt;
+        continue;
+      }
       const others = traffic.filter((t) => t.pos.distanceToSquared(b.car.position) > 0.5);
-      b.input = b.ai.drive(dt, others, limit);
+      // a car serving a reset penalty is held: drive it as if on the grid (also pauses stuck detection)
+      b.input = b.ai.drive(far ? dt * 2 : dt, others, b.penalty > 0 ? 0 : b.limit);
       if (b.penalty > 0) b.penalty -= dt;
       b.car.inputLocked = limit === 0 || b.penalty > 0;
-      b.car.speedLimit = limit;
+      b.car.speedLimit = b.limit;
       if (b.ai.wantsReset) {
         b.ai.wantsReset = false;
         if (!b.car.damage.destroyed) { this.resetCar(b.car, null, slot); b.penalty = 3; }
@@ -827,7 +866,7 @@ export class Session {
     const mine = st.find((s) => s.slot === this.self);
     const leader = st[0];
     const ref = leader?.best || leader?.last || this.map.track.length / 55;
-    const tower: TowerRow[] = st.slice(0, 10).map((s) => {
+    const tower: TowerRow[] = st.map((s) => {
       const g = this.entry(s.slot);
       const gapLaps = leader ? leader.lap + leader.frac - (s.lap + s.frac) : 0;
       const gap = s === leader ? (this.cfg.laps ? `L${Math.min(this.cfg.laps, s.lap + 1)}` : 'P1') : gapLaps >= 1 ? `+${Math.floor(gapLaps)}L` : `+${(gapLaps * ref).toFixed(1)}`;

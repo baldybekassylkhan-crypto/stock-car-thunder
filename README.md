@@ -2,7 +2,7 @@
 
 A 3D stock-car racing game that runs entirely in the browser as static files, so it can be hosted
 for free on GitHub Pages. You pick a nickname and race; there is no account or registration.
-Multiplayer (up to 10 players per room, joined with a 6-character room code) uses peer-to-peer WebRTC.
+Multiplayer (up to 12 players per room, joined with a 6-character room code, plus AI drivers for grids of up to 32 cars) uses peer-to-peer WebRTC.
 
 ## Status
 
@@ -21,8 +21,8 @@ Multiplayer (up to 10 players per room, joined with a 6-character room code) use
 | Milestone | What | State |
 |---|---|---|
 | A | Stock-car damage fix: contact is cosmetic, only big crashes wreck cars; steadier AI on banked turns | ✅ done |
-| B | 12 human players, up to 32 cars with AI | next |
-| C | Car choice in every race type | |
+| B | 12 human players, up to 32 cars with AI; LOD, batched snapshots, compact leaderboard | ✅ done |
+| C | Car choice in every race type | next |
 | D | Open-Wheel GP driving model | |
 | E | Pit stops (both series) | |
 | F | Three new GP circuits | |
@@ -65,7 +65,7 @@ Gamepad: left stick steers, RT/LT are throttle/brake, LB/RB shift, Y changes cam
 2. Friends click **Join room** and type the code, or just open the link.
 3. Everyone presses **Ready**, then the host picks the track, laps, damage level, AI drivers and weather and clicks **Start race**.
 
-Up to 10 cars race in one room (humans plus AI). Connections go directly browser-to-browser over WebRTC.
+Up to 12 people can join a room, and the host can fill the grid with AI drivers up to 32 cars. Connections go directly browser-to-browser over WebRTC.
 A few strict corporate or mobile networks block direct WebRTC connections; on those, players may not be able to connect (there is no relay server).
 
 ## Damage and crashes
@@ -90,16 +90,26 @@ A few strict corporate or mobile networks block direct WebRTC connections; on th
   hook is ready for multiplayer.
 - **Tracks:** each track is a spline with per-sample banking. Road surface, curved banking transition,
   SAFER wall, catch fence, pit road, lines and colliders are all generated from it.
-- **AI drivers:** pick speeds from the curvature and banking ahead (with braking distances), follow lanes or racing lines, draft, pass, keep a gap and avoid wrecks.
+- **AI drivers:** pick speeds from the curvature and banking ahead (with braking distances, tighter for inside lanes and with a margin in a pack), follow lanes or racing lines, draft, pass, keep a gap and avoid wrecks. They countersteer and lift when sliding, trail-brake instead of locking up mid-corner, slow down gradually for cautions and reset themselves if stuck.
 - **Networking:** star topology over WebRTC. The host's PeerJS id is derived from the
   room code; PeerJS's free public broker is used only to connect players, and gameplay data then
   flows directly between browsers. No game server is needed. Each player simulates their own car;
   others appear as interpolated kinematic bodies, so contact between cars feels solid. The host runs
   race control and the AI cars. Dents, lost parts and explosions are broadcast as events.
+  Car snapshots are 40 bytes. The host keeps the latest snapshot of every car and sends each client
+  one batched packet per tick (20 Hz), with only the cars that changed. Cars more than 220 m from that
+  client's car go at a third of the rate. For 11 clients and 31 other cars that's about 100 KB/s
+  upload for the host.
+- **Big grids:** beyond a quality-dependent distance (45–130 m), each car switches to one merged,
+  vertex-coloured mesh with no shadow (a full car is ~80 draw calls). With 32 cars that cuts render
+  time about 4× (27 → 7 ms in testing). Tyre smoke, dust and spray scale down with distance and grid
+  size. Bots far from every human re-plan their AI every other frame. The leaderboard shows the top
+  5 plus the cars around you.
 
 ### Dev testing
 
 In `npm run dev`, the browser console has `__run(...)` (an autopilot that steps the physics for N
 seconds) and `__race(seconds)` (an AI drives your car and the whole race is fast-forwarded). See
-`src/dev/autotest.ts`. Both are stripped from production builds. To test multiplayer locally, open two
+`src/dev/autotest.ts`. `await __quickRace(map, damage, bots)` starts a single race through the lobby, and
+`__damageTest(seconds)` fast-forwards an all-AI race and reports wrecks. All of these are stripped from production builds. To test multiplayer locally, open two
 browser tabs, host in one and join with the code in the other.

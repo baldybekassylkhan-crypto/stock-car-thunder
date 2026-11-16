@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Track, ovalCenterline } from './track';
 import { buildOval, infieldShape, ribbon } from './build';
 import type { LoadedMap } from './maps';
+import { makeGrid } from './maps';
 import * as tex from '../render/textures';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -327,10 +328,7 @@ export async function loadSunvale(): Promise<LoadedMap> {
     group,
     colliders: built.colliders,
     tvCams,
-    gridSlot: (slot) => {
-      const row = Math.floor(slot / 2);
-      return { i: track.wrap(-6 - row * 6), d: slot % 2 === 0 ? 5.5 : 10.5 };
-    },
+    gridSlot: makeGrid(track, { backM: 12, rowM: 9, lanes: [5.5, 10.5] }),
     paceSpeed: 36,
     oval: true,
     rain: false,

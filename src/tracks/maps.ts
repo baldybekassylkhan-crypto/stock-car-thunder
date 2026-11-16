@@ -44,6 +44,26 @@ export interface LoadedMap {
   outOfBounds: number;
 }
 
+export interface GridLayout {
+  /** Metres behind the start line to the first row. */
+  backM: number;
+  /** Metres between rows. */
+  rowM: number;
+  /** Lateral offsets (from the inner edge) of the two grid columns. */
+  lanes: [number, number];
+  /** Staggered grid (open-wheel style): the second column sits half a row further back. */
+  stagger?: boolean;
+}
+
+/** Grid slot → track position, two cars per row, spaced in metres so 32 cars fit on any track. */
+export function makeGrid(track: Track, g: GridLayout): (slot: number) => { i: number; d: number } {
+  return (slot) => {
+    const row = Math.floor(slot / 2), col = slot % 2;
+    const back = g.backM + row * g.rowM + (g.stagger && col === 1 ? g.rowM / 2 : 0);
+    return { i: track.wrap(-Math.round(back / track.ds)), d: g.lanes[col] };
+  };
+}
+
 export interface MapLoadOptions {
   rain: boolean;
 }

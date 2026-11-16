@@ -4,6 +4,7 @@ import { CarDamage, type DamageLevel } from '../damage/damage';
 import { wobble } from '../damage/visual';
 import type { DriverInput } from '../core/input';
 import { buildCarModel, CAR_COM_HEIGHT, TRACK_HALF, WHEELBASE_F, WHEELBASE_R, WHEEL_RADIUS, type CarVisual } from './carModel';
+import { buildLod } from './carLod';
 import type { SurfaceKind } from '../tracks/build';
 
 /**
@@ -166,6 +167,7 @@ export class Car {
     });
     this.wheels = [mk(TRACK_HALF, WHEELBASE_F, true), mk(-TRACK_HALF, WHEELBASE_F, true), mk(TRACK_HALF, WHEELBASE_R, false), mk(-TRACK_HALF, WHEELBASE_R, false)];
     this.visual = buildCarModel(opts);
+    buildLod(this.visual);
     this.snapshot();
     this.snapshot();
   }

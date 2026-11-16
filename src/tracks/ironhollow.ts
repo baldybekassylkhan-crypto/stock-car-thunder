@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Track, ovalCenterline } from './track';
 import { buildOval, infieldShape } from './build';
 import type { LoadedMap, MapLoadOptions } from './maps';
+import { makeGrid } from './maps';
 import * as tex from '../render/textures';
 import { grandstand, rng, UP, billboard, SPONSOR_BOARDS } from './props';
 
@@ -188,10 +189,7 @@ export async function loadIronHollow(_o: MapLoadOptions): Promise<LoadedMap> {
     group,
     colliders: built.colliders,
     tvCams,
-    gridSlot: (slot) => {
-      const row = Math.floor(slot / 2);
-      return { i: track.wrap(-5 - row * 6), d: slot % 2 === 0 ? 4 : 9 };
-    },
+    gridSlot: makeGrid(track, { backM: 9, rowM: 8, lanes: [4, 9] }),
     paceSpeed: 24,
     oval: true,
     rain: false,

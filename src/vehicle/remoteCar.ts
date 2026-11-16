@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RAPIER, GROUP_CAR, type PhysicsWorld } from '../physics/world';
 import { buildCarModel, CAR_COM_HEIGHT, type CarVisual, type PartName } from './carModel';
+import { buildLod } from './carLod';
 import type { CarState } from '../net/codec';
 import { charCar, hidePart } from '../damage/visual';
 
@@ -38,6 +39,7 @@ export class RemoteCar {
 
   constructor(private physics: PhysicsWorld, readonly slot: number, opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion) {
     this.visual = buildCarModel(opts);
+    buildLod(this.visual);
     this.body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(pos.x, pos.y, pos.z).setRotation(quat));
     const hull: number[] = [];
     for (const [x, y, z] of HULL) hull.push(x, y, z, -x, y, z);

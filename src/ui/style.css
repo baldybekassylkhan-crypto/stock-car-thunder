@@ -169,3 +169,10 @@ input.code { font-family: var(--font-display); font-size: 34px; letter-spacing: 
 .dmg-bars .draft { font-family: var(--font-display); font-size: 15px; font-weight: 800; color: #9fd8ff; margin-top: 6px; }
 .dmg-bars .draft.on { color: #5bc0ff; text-shadow: 0 0 10px rgba(91, 192, 255, 0.8); }
 @media (max-width: 700px) { .tower { display: none; } .minimap { width: 140px; height: 100px; } .speed { font-size: 60px; } }
+
+/* big grids (up to 32 cars) */
+.results-wrap { max-height: 58vh; overflow-y: auto; }
+.results-wrap th { position: sticky; top: 0; background: var(--panel-solid); }
+.results td { padding: 5px 6px; }
+.players { max-height: 46vh; overflow-y: auto; }
+.trow.gap { justify-content: center; height: 14px; opacity: 0.6; font-size: 12px; }

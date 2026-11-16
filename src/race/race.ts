@@ -2,6 +2,16 @@ import type * as THREE from 'three';
 import { LapProgress } from '../core/progress';
 import type { Track } from '../tracks/track';
 
+/**
+ * When race control lowers the speed limit (caution), slow down to it gradually (≈4 m/s²) instead
+ * of braking hard mid-corner, which spun whole fields. 0 (grid hold) and raising the limit apply at once.
+ */
+export function easeLimit(prev: number, target: number, speed: number, dt: number): number {
+  if (target === 0 || target >= prev) return target;
+  const from = Math.min(prev, Math.max(Math.abs(speed), target));
+  return Math.max(target, from - 4 * dt);
+}
+
 export type Phase = 'loading' | 'countdown' | 'pace' | 'green' | 'caution' | 'finished';
 export type Flag = 'none' | 'green' | 'yellow' | 'white' | 'checkered';
 

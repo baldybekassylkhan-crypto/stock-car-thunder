@@ -1,6 +1,6 @@
 import { profile, settings, saveProfile, saveSettings, validNickname, normalizeCode, LIVERY_COLORS, type Quality } from '../core/profile';
 import { MAPS } from '../tracks/maps';
-import { MAX_PLAYERS } from '../net/transport';
+import { MAX_GRID, MAX_HUMANS } from '../net/transport';
 import type { Room } from '../net/room';
 import type { ResultRow } from '../race/race';
 import type { GridEntry } from '../core/session';
@@ -65,7 +65,7 @@ export function mainMenu(nav: Nav, prefillCode?: string, notice?: string) {
       <div class="who">Driving as <b>${esc(profile.nickname)}</b> · #${profile.carNumber}<a id="rename">change</a></div>
       ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
       <div class="menu-grid">
-        <button class="menu-tile" id="host"><b>Host room</b><span>Get a 6-letter code and share it with up to 9 friends.</span></button>
+        <button class="menu-tile" id="host"><b>Host room</b><span>Get a 6-letter code and share it with up to ${MAX_HUMANS - 1} friends.</span></button>
         <button class="menu-tile" id="join"><b>Join room</b><span>Enter a friend's room code.</span></button>
         <button class="menu-tile" id="single"><b>Single race</b><span>Race AI drivers, or free practice on any track.</span></button>
         <button class="menu-tile" id="garage"><b>Garage &amp; settings</b><span>Car number, colour, graphics, assists.</span></button>
@@ -150,7 +150,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
             <div><label>Damage</label><select id="dmg"><option value="realistic">Realistic</option><option value="brutal">Brutal</option><option value="off">Off (visual only)</option></select></div>
           </div>
           <div class="row">
-            <div><label>AI drivers</label><select id="bots">${Array.from({ length: MAX_PLAYERS }, (_, i) => `<option value="${i}">${i}</option>`).join('')}</select></div>
+            <div><label>AI drivers</label><select id="bots">${Array.from({ length: MAX_GRID }, (_, i) => `<option value="${i}">${i}</option>`).join('')}</select></div>
             <div><label>Weather</label><select id="weather"><option value="dry">Dry</option><option value="rain">Rain</option></select></div>
           </div>
         </div>
@@ -181,7 +181,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
     lapsSel.value = String(s.laps);
     dmgSel.value = s.damage;
     const humans = room.humans.length;
-    const maxBots = MAX_PLAYERS - humans;
+    const maxBots = MAX_GRID - humans;
     botsSel.querySelectorAll('option').forEach((o) => (o.disabled = Number(o.value) > maxBots));
     botsSel.value = String(Math.min(s.bots, maxBots));
     weatherSel.value = s.weather;
@@ -190,9 +190,9 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
     const rows = room.players.map((p) => `<li><span class="num" style="background:${esc(p.color)}">${p.number}</span>${esc(p.nickname)}${p.slot === room.selfSlot ? ' <small>(you)</small>' : ''}<span class="tagline">${p.isHost ? 'Host' : p.ready ? '<span style="color:#3ad17a">Ready</span>' : 'Not ready'}${online && !p.isHost ? ` · ${p.ping} ms` : ''}</span></li>`);
     const bots = Math.min(s.bots, maxBots);
     for (let i = 0; i < bots; i++) rows.push(`<li><span class="num" style="background:#555">AI</span>${BOT_NAMES[i % BOT_NAMES.length]}<span class="tagline">AI driver</span></li>`);
-    for (let i = rows.length; i < MAX_PLAYERS; i++) rows.push('<li class="empty">Open slot</li>');
+    if (online) for (let i = humans; i < MAX_HUMANS; i++) rows.push('<li class="empty">Open player slot</li>');
     $('#players')!.innerHTML = rows.join('');
-    $('#dcount')!.textContent = `Drivers (${humans + bots}/${MAX_PLAYERS})`;
+    $('#dcount')!.textContent = `Drivers (${humans + bots}/${MAX_GRID}) · players ${humans}/${MAX_HUMANS}`;
     root.querySelectorAll<HTMLElement>('.map-opt').forEach((el) => el.addEventListener('click', () => {
       if (room.isHost) { room.setSettings({ map: el.dataset.id!, weather: MAPS.find((m) => m.id === el.dataset.id)?.weather ? room.settings.weather : 'dry' }); render(); }
     }));
@@ -251,7 +251,13 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
 const chatHistory: string[] = [];
 export function resetChat() { chatHistory.length = 0; }
 
-export const BOT_NAMES = ['R. Castellano', 'J. Whitfield', 'M. Okafor', 'T. Lindqvist', 'D. Haverford', 'K. Mbeki', 'S. Ruiz', 'B. Kowalski', 'A. Tanaka', 'L. Moreau'];
+/** Fictional AI drivers: enough for a full 32-car grid with no repeats. */
+export const BOT_NAMES = [
+  'R. Castellano', 'J. Whitfield', 'M. Okafor', 'T. Lindqvist', 'D. Haverford', 'K. Mbeki', 'S. Ruiz', 'B. Kowalski',
+  'A. Tanaka', 'L. Moreau', 'P. Varga', 'C. Delacroix', 'N. Brandt', 'E. Sorensen', 'F. Abernathy', 'G. Novak',
+  'H. Iwata', 'I. Calloway', 'O. Rautio', 'V. Petrakis', 'W. Ashdown', 'Y. Nakamura', 'Z. Quintero', 'R. Holloway',
+  'T. Mensah', 'S. Lindgren', 'M. Duarte', 'J. Prescott', 'K. Albrecht', 'D. Oyelaran', 'L. Fairbanks', 'A. Rostova',
+];
 
 // ---------------- results ----------------
 export function resultsScreen(rows: ResultRow[], grid: GridEntry[], isHost: boolean, h: { lobby(): void; leave(): void }) {
@@ -261,13 +267,13 @@ export function resultsScreen(rows: ResultRow[], grid: GridEntry[], isHost: bool
     <div class="card wide">
       <h2>Race results</h2>
       ${winner ? `<p class="tag">🏁 Winner: <b>${esc(name(winner.slot)?.nickname ?? '?')}</b></p>` : ''}
-      <table class="results">
+      <div class="results-wrap"><table class="results">
         <tr><th>Pos</th><th>Car</th><th>Driver</th><th>Laps</th><th>Best lap</th><th>Time</th><th>Status</th></tr>
         ${rows.map((r) => {
           const g = name(r.slot);
           return `<tr><td>${r.pos}</td><td><span class="num" style="background:${esc(g?.color ?? '#555')}">${g?.number ?? ''}</span></td><td>${esc(g?.nickname ?? '?')}${g?.bot ? ' <small>AI</small>' : ''}</td><td>${r.laps}</td><td>${fmtTime(r.best)}</td><td>${r.status === 1 ? fmtTime(r.total) : '—'}</td><td>${r.status === 1 ? 'Finished' : r.status === 2 ? 'DNF' : 'Running'}</td></tr>`;
         }).join('')}
-      </table>
+      </table></div>
       <div class="row" style="margin-top:16px">
         <button class="btn ghost" id="leave">Leave</button>
         ${isHost ? '<button class="btn" id="lobby">Back to lobby</button>' : '<div class="note" style="align-self:center">Waiting for the host…</div>'}

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { charLod } from '../vehicle/carLod';
 import type { CarVisual } from '../vehicle/carModel';
 import { CAR_COM_HEIGHT } from '../vehicle/carModel';
 
@@ -71,6 +72,7 @@ function recomputeLocalNormals(geo: THREE.BufferGeometry, touched: Set<number>) 
 
 /** Burnt-out shell after an explosion. */
 export function charCar(v: CarVisual) {
+  charLod(v);
   for (const m of v.paintMats) {
     m.map = null;
     m.color.set(0x15110e);

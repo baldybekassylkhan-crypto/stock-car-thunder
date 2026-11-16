@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Track, resampleClosed, smoothClosed } from './track';
 import { ribbon, toCollider, type ColliderMesh } from './build';
 import type { LoadedMap, MapLoadOptions } from './maps';
+import { makeGrid } from './maps';
 import * as tex from '../render/textures';
 import { rng, fbm2, mountainRing, grandstand, billboard, SPONSOR_BOARDS, UP } from './props';
 
@@ -406,10 +407,7 @@ export async function loadCedarRidge(o: MapLoadOptions): Promise<LoadedMap> {
     group,
     colliders,
     tvCams,
-    gridSlot: (slot) => {
-      const row = Math.floor(slot / 2);
-      return { i: track.wrap(-6 - row * 6), d: slot % 2 === 0 ? 3.8 : 9.2 };
-    },
+    gridSlot: makeGrid(track, { backM: 12, rowM: 9, lanes: [3.8, 9.2] }),
     paceSpeed: 26,
     oval: false,
     rain,
