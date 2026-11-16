@@ -1,5 +1,7 @@
 /** Synthesised V8 engine + tire squeal + wind (sample-free). Milestone 7 will add recorded layers. */
 export class EngineAudio {
+  /** Engine cylinders: a 4-stroke fires cylinders/2 times per revolution (V8 = 4, V6 = 3). */
+  cylinders = 8;
   private ctx: AudioContext;
   private master: GainNode;
   private oscA: OscillatorNode;
@@ -149,7 +151,7 @@ export class EngineAudio {
 
   update(rpm: number, throttle: number, slip: number, speed: number, limiter: boolean) {
     const t = this.ctx.currentTime;
-    const fire = (rpm / 60) * 4; // V8 firing frequency
+    const fire = (rpm / 60) * (this.cylinders / 2); // firing frequency
     const misfire = this.damage > 0.3 && Math.random() < this.damage * 0.35;
     const wob = (limiter ? (Math.random() < 0.5 ? 0.6 : 1) : 1) * (misfire ? 0.25 : 1) * (rpm < 50 ? 0 : 1);
     this.oscA.frequency.setTargetAtTime(fire / 2, t, 0.02);

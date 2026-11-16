@@ -2,6 +2,7 @@ import Peer, { type DataConnection } from 'peerjs';
 import { MAX_HUMANS, peerIdForRoom } from './transport';
 import type { Profile } from '../core/profile';
 import type { DamageLevel } from '../damage/damage';
+import { carSpec, type Series } from '../vehicle/catalog';
 import { encodeBatch, splitPacket, statePos } from './codec';
 
 export interface RoomSettings {
@@ -10,6 +11,10 @@ export interface RoomSettings {
   damage: DamageLevel;
   bots: number;
   weather: 'dry' | 'rain';
+  /** Which racing series this room runs (cars are picked from it). */
+  series: Series;
+  /** '' = every driver picks their own car; otherwise everyone races this car id. */
+  sameCar: string;
 }
 
 export interface Player {
@@ -21,10 +26,13 @@ export interface Player {
   isHost: boolean;
   ping: number;
   bot?: boolean;
+  /** Picked car per series (car ids); the room's series decides which one races. */
+  cars: Record<Series, string>;
 }
 
 type Msg =
-  | { t: 'hello'; nickname: string; number: number; color: string }
+  | { t: 'hello'; nickname: string; number: number; color: string; cars: Record<Series, string> }
+  | { t: 'car'; cars: Record<Series, string> }
   | { t: 'welcome'; slot: number; players: Player[]; settings: RoomSettings; inRace: boolean }
   | { t: 'reject'; reason: string }
   | { t: 'lobby'; players: Player[]; settings: RoomSettings }
@@ -33,6 +41,12 @@ type Msg =
   | { t: 'ping'; ts: number }
   | { t: 'pong'; ts: number }
   | { t: 'ev'; e: string; p: unknown; f?: number };
+
+/** Validate car picks from the network: unknown ids fall back to the series default. */
+function cleanCars(c: unknown): Record<Series, string> {
+  const o = (c ?? {}) as Record<string, unknown>;
+  return { stock: carSpec(String(o.stock), 'stock').id, gp: carSpec(String(o.gp), 'gp').id };
+}
 
 const PEER_OPTS = {
   debug: 1,
@@ -104,14 +118,14 @@ export class Room {
 
   static offline(profile: Profile, settings: RoomSettings): Room {
     const r = new Room('', true, true, settings);
-    r.players = [{ slot: 0, nickname: profile.nickname, number: profile.carNumber, color: profile.color, ready: true, isHost: true, ping: 0 }];
+    r.players = [{ slot: 0, nickname: profile.nickname, number: profile.carNumber, color: profile.color, ready: true, isHost: true, ping: 0, cars: { ...profile.cars } }];
     return r;
   }
 
   static host(profile: Profile, code: string, settings: RoomSettings): Promise<Room> {
     return new Promise((resolve, reject) => {
       const r = new Room(code, true, false, settings);
-      r.players = [{ slot: 0, nickname: profile.nickname, number: profile.carNumber, color: profile.color, ready: true, isHost: true, ping: 0 }];
+      r.players = [{ slot: 0, nickname: profile.nickname, number: profile.carNumber, color: profile.color, ready: true, isHost: true, ping: 0, cars: { ...profile.cars } }];
       const peer = new Peer(peerIdForRoom(code), PEER_OPTS);
       r.peer = peer;
       const timeout = setTimeout(() => { peer.destroy(); reject(new Error('Could not reach the matchmaking server. Check your connection.')); }, 15000);
@@ -133,7 +147,7 @@ export class Room {
 
   static join(profile: Profile, code: string): Promise<Room> {
     return new Promise((resolve, reject) => {
-      const r = new Room(code, false, false, { map: 'sunvale', laps: 10, damage: 'realistic', bots: 0, weather: 'dry' });
+      const r = new Room(code, false, false, { map: 'sunvale', laps: 10, damage: 'realistic', bots: 0, weather: 'dry', series: 'stock', sameCar: '' });
       const peer = new Peer(PEER_OPTS);
       r.peer = peer;
       let settled = false;
@@ -157,7 +171,7 @@ export class Room {
         r.hostEv = ev;
         r.hostSt = st;
         st.on('data', (d) => { if (d instanceof ArrayBuffer) for (const b of splitPacket(d)) r.onState(b); });
-        ev.on('open', () => ev.send({ t: 'hello', nickname: profile.nickname, number: profile.carNumber, color: profile.color } satisfies Msg));
+        ev.on('open', () => ev.send({ t: 'hello', nickname: profile.nickname, number: profile.carNumber, color: profile.color, cars: { ...profile.cars } } satisfies Msg));
         ev.on('data', (raw) => {
           const m = raw as Msg;
           if (m.t === 'welcome') {
@@ -204,7 +218,7 @@ export class Room {
         let slot = 1;
         while (used.has(slot)) slot++;
         this.links.set(conn.peer, { slot, ev: conn, st: this.pendingSt.get(conn.peer), sent: new Map() });
-        this.players.push({ slot, nickname: String(m.nickname).slice(0, 16), number: Number(m.number) | 0, color: String(m.color), ready: false, isHost: false, ping: 0 });
+        this.players.push({ slot, nickname: String(m.nickname).slice(0, 16), number: Number(m.number) | 0, color: String(m.color), ready: false, isHost: false, ping: 0, cars: cleanCars(m.cars) });
         conn.send({ t: 'welcome', slot, players: this.players, settings: this.settings, inRace: this.inRace } satisfies Msg);
         this.pushLobby();
         this.onChat(-1, `${m.nickname} joined`);
@@ -215,6 +229,12 @@ export class Room {
         case 'ready': {
           const p = this.players.find((x) => x.slot === link.slot);
           if (p) p.ready = !!m.ready;
+          this.pushLobby();
+          break;
+        }
+        case 'car': {
+          const p = this.players.find((x) => x.slot === link.slot);
+          if (p) p.cars = cleanCars(m.cars);
           this.pushLobby();
           break;
         }
@@ -301,6 +321,14 @@ export class Room {
     if (me) me.ready = ready;
     if (this.isHost) this.pushLobby();
     else this.hostEv?.send({ t: 'ready', ready } satisfies Msg);
+  }
+
+  /** Change this player's car picks (host applies them, clients ask the host). */
+  setCars(cars: Record<Series, string>) {
+    const me = this.self;
+    if (me) me.cars = { ...cars };
+    if (this.isHost) this.pushLobby();
+    else this.hostEv?.send({ t: 'car', cars: { ...cars } } satisfies Msg);
   }
 
   chat(text: string) {

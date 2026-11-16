@@ -3,51 +3,27 @@ import { RAPIER, PhysicsWorld, SURFACE_GRIP, SURFACE_DRAG, GROUP_CAR } from '../
 import { CarDamage, type DamageLevel } from '../damage/damage';
 import { wobble } from '../damage/visual';
 import type { DriverInput } from '../core/input';
-import { buildCarModel, CAR_COM_HEIGHT, TRACK_HALF, WHEELBASE_F, WHEELBASE_R, WHEEL_RADIUS, type CarVisual } from './carModel';
+import type { CarVisual } from './carModel';
+import { buildCarModel } from './models';
+import { carSpec, type CarSpec } from './catalog';
 import { buildLod } from './carLod';
 import type { SurfaceKind } from '../tracks/build';
 
 /**
- * Raycast-suspension stock car on a Rapier rigid body.
+ * Raycast-suspension car on a Rapier rigid body. Everything that makes cars differ (mass, springs,
+ * tyres, engine, gearbox, aero, geometry, damage profile) comes from its CarSpec (catalog.ts).
  * Local frame: +Z forward, +X left, +Y up; body origin = center of mass.
  */
-export const CAR = {
-  mass: 1550,
-  inertia: { x: 3500, y: 3900, z: 1050 }, // pitch, yaw, roll
-  restLength: 0.3,
-  springK: [92000, 84000], // front, rear  N/m (stiff: superspeedway loads reach 2.3 g)
-  damperC: [7000, 6400], // N·s/m
-  antiRoll: [26000, 14000],
-  bumpStop: 0.2,
-  mu: 1.36,
-  pacejka: { B: 10.5, C: 1.9 },
-  brakeForce: 9200, // per wheel at full pedal (front), rear scaled by bias
-  brakeBias: 0.58,
-  gears: [3.0, 1.95, 1.42, 1.0],
-  reverse: 2.9,
-  finalDrive: 3.6,
-  idle: 1300,
-  redline: 9200,
-  dragCdA: 0.98,
-  liftClA: 1.0,
-  aeroFront: 0.42,
-};
-
-// torque curve (rpm → N·m)
-const TORQUE: [number, number][] = [[1000, 380], [3000, 520], [5000, 640], [6500, 700], [7800, 670], [8800, 610], [9400, 520]];
-function torqueAt(rpm: number) {
-  if (rpm <= TORQUE[0][0]) return TORQUE[0][1];
-  for (let i = 1; i < TORQUE.length; i++) {
-    if (rpm <= TORQUE[i][0]) {
-      const [r0, t0] = TORQUE[i - 1], [r1, t1] = TORQUE[i];
+function torqueAt(curve: [number, number][], rpm: number) {
+  if (rpm <= curve[0][0]) return curve[0][1];
+  for (let i = 1; i < curve.length; i++) {
+    if (rpm <= curve[i][0]) {
+      const [r0, t0] = curve[i - 1], [r1, t1] = curve[i];
       return t0 + ((rpm - r0) / (r1 - r0)) * (t1 - t0);
     }
   }
-  return TORQUE[TORQUE.length - 1][1];
+  return curve[curve.length - 1][1];
 }
-
-const STATIC_COMP = (CAR.mass * 9.81) / 4 / ((CAR.springK[0] + CAR.springK[1]) / 2);
-const HARDPOINT_Y = -(CAR_COM_HEIGHT - WHEEL_RADIUS) + CAR.restLength - STATIC_COMP;
 
 interface WheelState {
   local: THREE.Vector3;
@@ -89,6 +65,8 @@ export interface CarTelemetry {
   steer: number;
   limiter: boolean;
   slip: number;
+  /** Redline of this car's engine (for the rev bar). */
+  maxRpm: number;
 }
 
 export interface CarContact {
@@ -117,7 +95,7 @@ export class Car {
   private visT = 0;
   readonly visual: CarVisual;
   readonly wheels: WheelState[];
-  readonly telemetry: CarTelemetry = { speed: 0, rpm: CAR.idle, gear: 1, throttle: 0, brake: 0, steer: 0, limiter: false, slip: 0 };
+  readonly telemetry: CarTelemetry;
   manual = false;
   tractionControl = true;
   abs = true;
@@ -132,8 +110,18 @@ export class Car {
   /** 0 = clean air, up to ~0.35 = deep in another car's draft (milestone 3+). */
   draft = 0;
 
-  constructor(private physics: PhysicsWorld, opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, damageLevel: DamageLevel = 'realistic') {
-    this.damage = new CarDamage(damageLevel, CAR.mass);
+  readonly spec: CarSpec;
+  /** Static suspension compression and wheel hardpoint height (depend on the spec). */
+  private staticComp: number;
+  private hardpointY: number;
+
+  constructor(private physics: PhysicsWorld, opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, damageLevel: DamageLevel = 'realistic', spec: CarSpec = carSpec(undefined)) {
+    this.spec = spec;
+    const g = spec.geo;
+    this.staticComp = (spec.mass * 9.81) / 4 / ((spec.springK[0] + spec.springK[1]) / 2);
+    this.hardpointY = -(g.comHeight - g.wheelRadius) + spec.restLength - this.staticComp;
+    this.telemetry = { speed: 0, rpm: spec.idle, gear: 1, throttle: 0, brake: 0, steer: 0, limiter: false, slip: 0, maxRpm: spec.redline };
+    this.damage = new CarDamage(damageLevel, spec.mass, spec.damage);
     const w = physics.world;
     this.body = w.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
@@ -144,29 +132,22 @@ export class Car {
         .setLinearDamping(0.0)
         .setAngularDamping(0.15),
     );
-    // car-shaped convex hull (local frame, ground at y = -0.45): raised nose/tail for approach angles
+    // car-shaped convex hull from the spec (mirrored in x)
     const hull: number[] = [];
-    const pts: [number, number, number][] = [
-      [0.96, -0.25, 1.85], [0.96, -0.25, -1.8], // floor
-      [0.92, -0.18, 2.62], [0.92, 0.12, 2.64], // nose
-      [0.92, -0.16, -2.62], [0.92, 0.5, -2.62], // tail
-      [0.96, 0.32, 1.9], [0.96, 0.48, -2.4], // body top
-      [0.66, 0.42, 1.05], [0.68, 0.84, 0.05], [0.68, 0.86, -0.85], [0.68, 0.5, -1.9], // greenhouse
-    ];
-    for (const [x, y, z] of pts) hull.push(x, y, z, -x, y, z);
+    for (const [x, y, z] of spec.hull) hull.push(x, y, z, -x, y, z);
     const main = (RAPIER.ColliderDesc.roundConvexHull(new Float32Array(hull), 0.03) ?? RAPIER.ColliderDesc.roundCuboid(0.92, 0.36, 2.5, 0.08))
       .setFriction(0.35)
       .setRestitution(0.1)
-      .setMassProperties(CAR.mass, { x: 0, y: 0, z: 0 }, CAR.inertia, { x: 0, y: 0, z: 0, w: 1 })
+      .setMassProperties(spec.mass, { x: 0, y: 0, z: 0 }, spec.inertia, { x: 0, y: 0, z: 0, w: 1 })
       .setCollisionGroups(GROUP_CAR);
     this.collider = w.createCollider(main, this.body);
 
     const mk = (x: number, z: number, front: boolean): WheelState => ({
-      local: new THREE.Vector3(x, HARDPOINT_Y, z), front, left: x > 0, comp: STATIC_COMP, prevComp: STATIC_COMP, contact: false, load: 0,
+      local: new THREE.Vector3(x, this.hardpointY, z), front, left: x > 0, comp: this.staticComp, prevComp: this.staticComp, contact: false, load: 0,
       surface: 'asphalt', omega: 0, angle: 0, slip: 0, locked: false, spinning: false, point: new THREE.Vector3(),
     });
-    this.wheels = [mk(TRACK_HALF, WHEELBASE_F, true), mk(-TRACK_HALF, WHEELBASE_F, true), mk(TRACK_HALF, WHEELBASE_R, false), mk(-TRACK_HALF, WHEELBASE_R, false)];
-    this.visual = buildCarModel(opts);
+    this.wheels = [mk(g.trackHalf, g.wheelbaseF, true), mk(-g.trackHalf, g.wheelbaseF, true), mk(g.trackHalf, g.wheelbaseR, false), mk(-g.trackHalf, g.wheelbaseR, false)];
+    this.visual = buildCarModel(opts, spec);
     buildLod(this.visual);
     this.snapshot();
     this.snapshot();
@@ -178,7 +159,7 @@ export class Car {
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.gear = 1;
-    this.wheels.forEach((w) => { w.omega = 0; w.comp = w.prevComp = STATIC_COMP; });
+    this.wheels.forEach((w) => { w.omega = 0; w.comp = w.prevComp = this.staticComp; });
     this.snapshot();
     this.snapshot();
   }
@@ -190,6 +171,8 @@ export class Car {
 
   /** Called once per physics substep before world.step(). */
   step(input: DriverInput, dt: number) {
+    const CAR = this.spec;
+    const WHEEL_RADIUS = CAR.geo.wheelRadius;
     const b = this.body;
     const t = b.translation();
     const r = b.rotation();
@@ -229,7 +212,7 @@ export class Car {
       else { const tmp = throttle; throttle = brake; brake = tmp; }
     }
 
-    const steerLock = THREE.MathUtils.lerp(0.58, 0.07, THREE.MathUtils.smoothstep(Math.abs(vFwd), 3, 62));
+    const steerLock = THREE.MathUtils.lerp(CAR.steerLock[0], CAR.steerLock[1], THREE.MathUtils.smoothstep(Math.abs(vFwd), 3, 62));
     const targetSteer = steerIn * steerLock * this.damage.steerFactor + this.damage.steerPull;
     const steerRate = 2.2;
     this.steerAngle += THREE.MathUtils.clamp(targetSteer - this.steerAngle, -steerRate * dt, steerRate * dt);
@@ -239,14 +222,14 @@ export class Car {
     const rearSpeed = (this.wheels[2].omega + this.wheels[3].omega) * 0.5 * WHEEL_RADIUS;
     const wheelRpm = (Math.abs(vFwd * 0.6 + rearSpeed * 0.4) / WHEEL_RADIUS) * (60 / (2 * Math.PI));
     let rpm = wheelRpm * Math.abs(ratio) * CAR.finalDrive;
-    const clutchRpm = CAR.idle + throttle * 3200;
+    const clutchRpm = CAR.idle + throttle * CAR.redline * 0.35;
     if ((this.gear === 1 || this.gear === -1) && rpm < clutchRpm) rpm = clutchRpm; // slipping clutch launch
     rpm = Math.max(CAR.idle, rpm);
     const limiter = rpm >= CAR.redline;
     if (this.shiftTimer > 0) this.shiftTimer -= dt;
     let torque = 0;
     if (this.shiftTimer <= 0) {
-      torque = limiter ? 0 : torqueAt(rpm) * throttle * this.damage.power;
+      torque = limiter ? 0 : torqueAt(CAR.torque, rpm) * throttle * this.damage.power;
       if (throttle < 0.05) torque = -(40 + rpm * 0.012) * THREE.MathUtils.clamp(Math.abs(vFwd) / 5, 0, 1); // engine braking (only when rolling)
     }
     let driveForce = (torque * ratio * CAR.finalDrive * 0.88) / WHEEL_RADIUS;
@@ -255,13 +238,13 @@ export class Car {
     // automatic / manual shifting
     if (this.gear > 0) {
       if (this.manual) {
-        if (input.shiftUp && this.gear < 4) { this.gear++; this.shiftTimer = 0.12; }
+        if (input.shiftUp && this.gear < CAR.gears.length) { this.gear++; this.shiftTimer = 0.12; }
         if (input.shiftDown && this.gear > 1) { this.gear--; this.shiftTimer = 0.1; }
       } else if (this.shiftTimer <= 0) {
-        if (rpm > 8900 && this.gear < 4) { this.gear++; this.shiftTimer = 0.14; }
+        if (rpm > CAR.shiftUpRpm && this.gear < CAR.gears.length) { this.gear++; this.shiftTimer = CAR.series === 'gp' ? 0.05 : 0.14; }
         else if (this.gear > 1) {
           const lower = (wheelRpm * CAR.gears[this.gear - 2] * CAR.finalDrive);
-          if (lower < 6400) { this.gear--; this.shiftTimer = 0.1; }
+          if (lower < CAR.shiftDownRpm) { this.gear--; this.shiftTimer = CAR.series === 'gp' ? 0.04 : 0.1; }
         }
       }
     }
@@ -399,9 +382,9 @@ export class Car {
     if (speed > 0.1) b.applyImpulse({ x: (-_lin.x / speed) * dragMag * dt, y: (-_lin.y / speed) * dragMag * dt, z: (-_lin.z / speed) * dragMag * dt }, true);
     const down = 0.5 * rho * CAR.liftClA * vFwd * vFwd;
     // roof flaps: deploy when travelling backwards/sideways fast, killing lift so the car stays down
-    this.flapsOpen = speed > 30 && _lin.dot(_fwd) / speed < -0.3;
+    this.flapsOpen = CAR.roofFlaps && speed > 30 && _lin.dot(_fwd) / speed < -0.3;
     if (this.flapsOpen) b.applyImpulse({ x: 0, y: -0.5 * rho * 1.4 * speed * speed * dt, z: 0 }, true);
-    for (const [z, share] of [[WHEELBASE_F, CAR.aeroFront * this.damage.aeroFront], [WHEELBASE_R, (1 - CAR.aeroFront) * this.damage.aeroRear]] as const) {
+    for (const [z, share] of [[CAR.geo.wheelbaseF, CAR.aeroFront * this.damage.aeroFront], [CAR.geo.wheelbaseR, (1 - CAR.aeroFront) * this.damage.aeroRear]] as const) {
       _p.set(0, 0, z).applyQuaternion(_q).add(t as THREE.Vector3Like);
       const f = down * share * dt;
       b.applyImpulseAtPoint({ x: -_up.x * f, y: -_up.y * f, z: -_up.z * f }, _p, true);
@@ -431,7 +414,7 @@ export class Car {
    */
   collisionImpulse(dt: number): THREE.Vector3 {
     const v = this.body.linvel();
-    return new THREE.Vector3(v.x - this.preVel.x, v.y - this.preVel.y + 9.81 * dt, v.z - this.preVel.z - 0).multiplyScalar(CAR.mass);
+    return new THREE.Vector3(v.x - this.preVel.x, v.y - this.preVel.y + 9.81 * dt, v.z - this.preVel.z - 0).multiplyScalar(this.spec.mass);
   }
 
   /** Set by damage when a burning car should blow up; the session consumes it. */
@@ -504,7 +487,7 @@ export class Car {
     const pos = _pos.copy(this.prevPos).lerp(this.curPos, alpha);
     const quat = _q.copy(this.prevQuat).slerp(this.curQuat, alpha);
     v.root.quaternion.copy(quat);
-    v.root.position.copy(pos).add(_v.set(0, -CAR_COM_HEIGHT, 0).applyQuaternion(quat));
+    v.root.position.copy(pos).add(_v.set(0, -this.spec.geo.comHeight, 0).applyQuaternion(quat));
     this.visT += dt;
     // loose parts rattle
     for (const [name, st] of Object.entries(this.damage.parts)) if (st === 'loose') wobble(v.parts[name as keyof typeof v.parts], this.visT, Math.abs(this.telemetry.speed));
@@ -516,8 +499,8 @@ export class Car {
       if (this.wheelGone[i]) continue;
       const w = this.wheels[i];
       const pivot = v.wheels[i];
-      const ext = CAR.restLength - (w.contact ? w.comp : 0);
-      pivot.position.y = HARDPOINT_Y + CAR_COM_HEIGHT - ext;
+      const ext = this.spec.restLength - (w.contact ? w.comp : 0);
+      pivot.position.y = this.hardpointY + this.spec.geo.comHeight - ext;
       pivot.rotation.y = w.front ? -this.steerAngle : 0;
       w.angle += w.omega * dt;
       (pivot.children[0] as THREE.Object3D).rotation.x = w.angle;

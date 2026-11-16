@@ -154,15 +154,16 @@ export function installDamageTest(getSession: () => Session | null) {
   };
 }
 
-/** `await __quickRace(map, damage, bots)`: from the main menu, start a single race through the lobby UI. */
+/** `await __quickRace(map, damage, bots, laps, series, car)`: from the main menu, start a single race through the lobby UI. */
 export function installQuickRace(getSession: () => Session | null) {
-  (window as Any).__quickRace = async (map = 'sunvale', damage = 'realistic', bots = 9, laps = 10) => {
+  (window as Any).__quickRace = async (map = 'sunvale', damage = 'realistic', bots = 9, laps = 10, series = 'stock', car = '') => {
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const btn = (pred: (t: string) => boolean) => [...document.querySelectorAll('button')].find((b) => pred(b.textContent ?? ''));
     btn((t) => t.startsWith('Single'))?.click();
     await wait(300);
     document.querySelector<HTMLElement>(`.map-opt[data-id="${map}"]`)?.click();
     const set = (id: string, v: string) => { const el = document.querySelector<HTMLSelectElement>(`#${id}`)!; el.value = v; el.dispatchEvent(new Event('change')); };
+    set('series', series); set('samecar', car); // car = '' → free choice, else everyone drives it
     set('dmg', damage); set('laps', String(laps)); set('bots', String(bots));
     btn((t) => t === 'Start race')?.click();
     for (let i = 0; i < 80 && !(getSession() as Any)?.bots?.size; i++) await wait(250);

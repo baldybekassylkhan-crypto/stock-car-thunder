@@ -1,15 +1,14 @@
 import * as THREE from 'three';
 import { charLod } from '../vehicle/carLod';
 import type { CarVisual } from '../vehicle/carModel';
-import { CAR_COM_HEIGHT } from '../vehicle/carModel';
 
 /**
  * Crumple the car's body meshes around an impact point.
- * `localCom` is in the physics (centre-of-mass) frame; the visual root sits CAR_COM_HEIGHT lower.
+ * `localCom` is in the physics (centre-of-mass) frame; the visual root sits `v.comHeight` lower.
  */
 export function dentCar(v: CarVisual, localCom: THREE.Vector3, inward: THREE.Vector3, magnitude: number) {
   if (magnitude <= 0.002) return;
-  const p = localCom.clone().setY(localCom.y + CAR_COM_HEIGHT);
+  const p = localCom.clone().setY(localCom.y + v.comHeight);
   const radius = 0.45 + magnitude * 2.2;
   const inv = new THREE.Matrix4();
   const pl = new THREE.Vector3();

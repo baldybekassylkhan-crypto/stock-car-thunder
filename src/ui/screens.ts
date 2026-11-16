@@ -5,6 +5,8 @@ import type { Room } from '../net/room';
 import type { ResultRow } from '../race/race';
 import type { GridEntry } from '../core/session';
 import { fmtTime } from '../core/progress';
+import { carSpec, carsOf, carStats, SERIES_LABEL, type Series } from '../vehicle/catalog';
+import { CarPreview } from './carPreview';
 
 const ui = () => document.getElementById('ui')!;
 
@@ -12,13 +14,23 @@ export function esc(s: string) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
+/** Clean-up for the current screen (e.g. the car preview's WebGL context), run when it is replaced. */
+let screenCleanup: (() => void) | null = null;
+function runCleanup() {
+  const f = screenCleanup;
+  screenCleanup = null;
+  f?.();
+}
+
 function mount(html: string, withBackdrop = true): HTMLElement {
+  runCleanup();
   const root = ui();
   root.innerHTML = (withBackdrop ? '<div class="backdrop"></div>' : '') + html;
   return root;
 }
 
 export function clearUI() {
+  runCleanup();
   ui().innerHTML = '';
 }
 
@@ -153,12 +165,29 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
             <div><label>AI drivers</label><select id="bots">${Array.from({ length: MAX_GRID }, (_, i) => `<option value="${i}">${i}</option>`).join('')}</select></div>
             <div><label>Weather</label><select id="weather"><option value="dry">Dry</option><option value="rain">Rain</option></select></div>
           </div>
+          <div class="row">
+            <div><label>Series</label><select id="series">${(Object.keys(SERIES_LABEL) as Series[]).map((k) => `<option value="${k}">${SERIES_LABEL[k]}</option>`).join('')}</select></div>
+            <div><label>Cars</label><select id="samecar"></select></div>
+          </div>
         </div>
         <div class="stack">
           <div><label id="dcount">Drivers</label><ul class="players" id="players"></ul></div>
           ${online ? `<div class="chat"><div class="chat-log" id="chatlog"></div><input id="chatin" type="text" maxlength="200" placeholder="Say something… (Enter)" /></div>` : ''}
         </div>
       </div>
+      <div class="carpick" id="carpick">
+            <canvas class="carpick-view" id="carview"></canvas>
+            <div class="carpick-info">
+              <div class="carpick-head">
+                <button class="btn ghost carpick-arrow" id="carprev" aria-label="Previous car">‹</button>
+                <div class="carpick-name"><b id="carname"></b><small id="cartag"></small></div>
+                <button class="btn ghost carpick-arrow" id="carnext" aria-label="Next car">›</button>
+              </div>
+              <div class="note" id="carblurb"></div>
+              <div class="carpick-bars" id="carbars"></div>
+              <div class="note" id="carfacts"></div>
+            </div>
+          </div>
       <div class="row" style="margin-top:16px">
         <button class="btn ghost" id="leave">${online ? 'Leave room' : 'Back'}</button>
         ${room.isHost ? '<button class="btn" id="start">Start race</button>' : '<button class="btn" id="ready">Ready</button>'}
@@ -166,9 +195,52 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
       <div class="note" id="hint" style="margin-top:8px"></div>
     </div>`);
   const $ = <T extends HTMLElement>(s: string) => root.querySelector<T>(s);
-  const selects = ['laps', 'dmg', 'bots', 'weather'].map((id) => $<HTMLSelectElement>(`#${id}`)!);
-  const [lapsSel, dmgSel, botsSel, weatherSel] = selects;
+  const selects = ['laps', 'dmg', 'bots', 'weather', 'series', 'samecar'].map((id) => $<HTMLSelectElement>(`#${id}`)!);
+  const [lapsSel, dmgSel, botsSel, weatherSel, seriesSel, sameSel] = selects;
   if (!room.isHost) selects.forEach((s) => (s.disabled = true));
+
+  // ---- car picker: every player picks a car of the room's series (unless the host forces one) ----
+  const preview = new CarPreview($<HTMLCanvasElement>('#carview')!);
+  screenCleanup = () => preview.dispose();
+  let sameKey = '';
+  const myCar = () => {
+    const s = room.settings;
+    const forced = !!s.sameCar && carSpec(s.sameCar).id === s.sameCar && carSpec(s.sameCar).series === s.series;
+    return { spec: forced ? carSpec(s.sameCar) : carSpec(profile.cars[s.series], s.series), forced };
+  };
+  const renderCar = () => {
+    const s = room.settings;
+    // the "same car" options depend on the series
+    if (sameKey !== s.series) {
+      sameKey = s.series;
+      sameSel.innerHTML = `<option value="">Free choice</option>${carsOf(s.series).map((c) => `<option value="${c.id}">All drive: ${esc(c.name)}</option>`).join('')}`;
+    }
+    seriesSel.value = s.series;
+    sameSel.value = carsOf(s.series).some((c) => c.id === s.sameCar) ? s.sameCar : '';
+    const { spec, forced } = myCar();
+    const st = carStats(spec);
+    $('#carname')!.textContent = spec.name;
+    $('#cartag')!.textContent = `${SERIES_LABEL[spec.series]} · ${spec.archetype}`;
+    $('#carblurb')!.textContent = forced ? `${spec.blurb} (The host set the same car for everyone.)` : spec.blurb;
+    $('#carbars')!.innerHTML = st.bars.map((b) => `<div class="cbar"><span>${b.label}</span><div class="cbar-track"><div class="cbar-fill" style="width:${Math.round(b.value * 100)}%"></div></div></div>`).join('');
+    const kmh = settings.units === 'kmh';
+    $('#carfacts')!.textContent = `≈ ${Math.round(st.topSpeed * (kmh ? 3.6 : 2.237))} ${kmh ? 'km/h' : 'mph'} top speed · ${Math.round(st.power * 1.341)} hp · ${spec.mass} kg · ${spec.gears.length}-speed`;
+    $<HTMLButtonElement>('#carprev')!.disabled = $<HTMLButtonElement>('#carnext')!.disabled = forced;
+    preview.setCar(spec, profile.color, profile.carNumber);
+  };
+  const stepCar = (dir: number) => {
+    const s = room.settings;
+    const list = carsOf(s.series);
+    const i = list.findIndex((c) => c.id === carSpec(profile.cars[s.series], s.series).id);
+    profile.cars[s.series] = list[(i + dir + list.length) % list.length].id;
+    saveProfile();
+    room.setCars(profile.cars);
+    render();
+  };
+  $('#carprev')!.addEventListener('click', () => stepCar(-1));
+  $('#carnext')!.addEventListener('click', () => stepCar(1));
+  seriesSel.addEventListener('change', () => { room.setSettings({ series: seriesSel.value as Series, sameCar: '' }); render(); });
+  sameSel.addEventListener('change', () => { room.setSettings({ sameCar: sameSel.value }); render(); });
 
   const render = () => {
     const s = room.settings;
@@ -187,7 +259,10 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
     weatherSel.value = s.weather;
     weatherSel.disabled = !room.isHost || !map.weather;
     if (!map.weather) weatherSel.value = 'dry';
-    const rows = room.players.map((p) => `<li><span class="num" style="background:${esc(p.color)}">${p.number}</span>${esc(p.nickname)}${p.slot === room.selfSlot ? ' <small>(you)</small>' : ''}<span class="tagline">${p.isHost ? 'Host' : p.ready ? '<span style="color:#3ad17a">Ready</span>' : 'Not ready'}${online && !p.isHost ? ` · ${p.ping} ms` : ''}</span></li>`);
+    renderCar();
+    const forcedCar = myCar().forced ? myCar().spec : null;
+    const carOf = (p: Room['players'][number]) => (forcedCar ?? carSpec(p.cars?.[s.series], s.series)).name;
+    const rows = room.players.map((p) => `<li><span class="num" style="background:${esc(p.color)}">${p.number}</span><span class="pname"><span>${esc(p.nickname)}${p.slot === room.selfSlot ? ' <small>(you)</small>' : ''}</span><small class="pcar">${esc(carOf(p))}</small></span><span class="tagline">${p.isHost ? 'Host' : p.ready ? '<span style="color:#3ad17a">Ready</span>' : 'Not ready'}${online && !p.isHost ? ` · ${p.ping} ms` : ''}</span></li>`);
     const bots = Math.min(s.bots, maxBots);
     for (let i = 0; i < bots; i++) rows.push(`<li><span class="num" style="background:#555">AI</span>${BOT_NAMES[i % BOT_NAMES.length]}<span class="tagline">AI driver</span></li>`);
     if (online) for (let i = humans; i < MAX_HUMANS; i++) rows.push('<li class="empty">Open player slot</li>');

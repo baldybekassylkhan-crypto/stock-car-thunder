@@ -32,6 +32,10 @@ export interface CarVisual {
   flaps: THREE.Object3D[];
   wiper: THREE.Object3D;
   primary: string;
+  /** Height of the physics centre of mass above the model origin (ground). */
+  comHeight: number;
+  /** Where damage smoke and fire come from (model frame). */
+  engineBay: THREE.Vector3;
 }
 
 function liveryTexture(primary: string, secondary: string, pattern: number): THREE.CanvasTexture {
@@ -68,7 +72,7 @@ function liveryTexture(primary: string, secondary: string, pattern: number): THR
   return t;
 }
 
-function numberDecal(num: number, fill: string, outline: string, sponsor: string, width = 512, height = 420): THREE.CanvasTexture {
+export function numberDecal(num: number, fill: string, outline: string, sponsor: string, width = 512, height = 420): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = width; c.height = height;
   const ctx = c.getContext('2d')!;
@@ -98,7 +102,7 @@ function numberDecal(num: number, fill: string, outline: string, sponsor: string
   return t;
 }
 
-function textDecal(text: string, bg: string | null, fg: string, w = 1024, h = 256): THREE.CanvasTexture {
+export function textDecal(text: string, bg: string | null, fg: string, w = 1024, h = 256): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const ctx = c.getContext('2d')!;
@@ -112,19 +116,20 @@ function textDecal(text: string, bg: string | null, fg: string, w = 1024, h = 25
   return t;
 }
 
-function contrast(hex: string) {
+export function contrast(hex: string) {
   const c = new THREE.Color(hex);
   return c.r * 0.3 + c.g * 0.59 + c.b * 0.11 > 0.55 ? '#111111' : '#ffffff';
 }
 
-function decalPlane(w: number, h: number, map: THREE.Texture, transparent = true) {
+export function decalPlane(w: number, h: number, map: THREE.Texture, transparent = true) {
   return new THREE.Mesh(
     new THREE.PlaneGeometry(w, h),
     new THREE.MeshPhysicalMaterial({ map, transparent, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.06, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, depthWrite: false }),
   );
 }
 
-export function buildCarModel(opts: { number: number; color: string; seed: number }): CarVisual {
+/** The stock-car body (see models.ts for picking a body by car spec). */
+export function buildStockModel(opts: { number: number; color: string; seed: number }): CarVisual {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
@@ -484,5 +489,7 @@ export function buildCarModel(opts: { number: number; color: string; seed: numbe
     flaps,
     wiper,
     primary,
+    comHeight: CAR_COM_HEIGHT,
+    engineBay: new THREE.Vector3(0, 0.85, 1.7),
   };
 }

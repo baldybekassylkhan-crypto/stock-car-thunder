@@ -176,3 +176,20 @@ input.code { font-family: var(--font-display); font-size: 34px; letter-spacing: 
 .results td { padding: 5px 6px; }
 .players { max-height: 46vh; overflow-y: auto; }
 .trow.gap { justify-content: center; height: 14px; opacity: 0.6; font-size: 12px; }
+
+/* car picker */
+.carpick { display: grid; grid-template-columns: 300px 1fr; gap: 16px; padding: 10px; margin-top: 16px; border: 1px solid var(--line); border-radius: 9px; }
+.carpick-view { width: 100%; height: 170px; border-radius: 7px; background: radial-gradient(circle at 50% 35%, #2a3140, #0d1016 75%); display: block; }
+.carpick-info { min-width: 0; }
+.carpick-head { display: flex; align-items: center; gap: 8px; }
+.carpick-arrow { flex: none; width: 34px; height: 34px; padding: 0; font-size: 22px; line-height: 1; }
+.carpick-name { flex: 1; min-width: 0; text-align: center; }
+.carpick-name b { display: block; font: 800 22px var(--font-display); }
+.carpick-name small { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+.carpick-bars { margin: 6px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
+.cbar { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.cbar-track { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.cbar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+.players .pname { display: flex; flex-direction: column; line-height: 1.15; }
+.players .pcar { color: var(--muted); font-weight: 400; font-size: 12px; }
+@media (max-width: 700px) { .carpick { grid-template-columns: 1fr; } }

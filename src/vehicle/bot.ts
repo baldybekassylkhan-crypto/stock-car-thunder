@@ -13,6 +13,10 @@ export interface Traffic {
 }
 
 const G = 9.81;
+/** Downforce per mass per (m/s)² of the reference stock car the base grip numbers were tuned on. */
+const C_STOCK = (0.5 * 1.225 * 1.0) / 1550;
+/** Highest lateral load (g) a bot will plan a corner for. */
+const MAX_LAT_G = 3.8;
 /** Oval lane limits (m from the inside edge / from the outside wall) so bots don't ride the wall. */
 const OVAL_IN = 2.5;
 const OVAL_OUT = 3.6;
@@ -51,10 +55,26 @@ export class BotDriver {
     const inward = (kc > 0 ? 1 : -1) * (tr.width / 2 - lane);
     const k = 1 / Math.max(5, 1 / Math.abs(kc) - inward);
     const th = Math.abs(tr.bank[tr.wrap(i)]);
-    const mu = (this.oval ? 1.05 : 0.98) * this.skill * this.car.gripScale;
+    const mu = (this.oval ? 1.05 : 0.98) * this.gripK * this.skill * this.car.gripScale;
     const tan = Math.tan(th);
-    const a = (G * (mu + tan)) / Math.max(0.15, 1 - mu * tan);
-    return Math.sqrt(a / k);
+    // lateral capacity: v²k = [g(μ + tanθ) + μ·c·v²] / (1 − μ·tanθ), where c·v² is the extra
+    // downforce (per mass) over the reference car → v² = g(μ + tanθ) / (k(1 − μ·tanθ) − μ·c)
+    const den = Math.max(0.15, 1 - mu * tan);
+    const lim = k * den - mu * this.aeroC * 0.85;
+    // never plan for more lateral load than tyres and suspension really take (banking + downforce
+    // multiply in the formula above and would ask for 8 g on a steep short oval)
+    const vCap = Math.sqrt((MAX_LAT_G * G) / k);
+    if (lim <= 1e-5) return Math.min(200, vCap);
+    return Math.min(200, vCap, Math.sqrt((G * (mu + tan)) / lim));
+  }
+
+  /** Car grip relative to the reference stock car the base numbers were tuned on. */
+  private get gripK() { return this.car.spec.mu / 1.36; }
+  /** Downforce per mass per (m/s)² beyond the reference stock car (negative = less). */
+  private get aeroC() { return (0.5 * 1.225 * this.car.spec.liftClA) / this.car.spec.mass - C_STOCK; }
+  /** Braking deceleration available at speed v (downforce helps). */
+  private decelAt(v: number) {
+    return (this.oval ? 8.5 : 7) * this.gripK * (1 + Math.max(0, this.aeroC) * v * v / G * 0.5);
   }
 
   drive(dt: number, traffic: Traffic[], raceSpeedLimit: number): DriverInput {
@@ -134,7 +154,7 @@ export class BotDriver {
     // yaw damping: countersteer when the car rotates faster (or slower) than the corner needs
     const yawErr = car.body.angvel().y - sp * tr.curvature[i];
     ang += THREE.MathUtils.clamp(yawErr, -1.5, 1.5) * 0.12;
-    const lock = THREE.MathUtils.lerp(0.58, 0.07, THREE.MathUtils.smoothstep(Math.abs(sp), 3, 62));
+    const lock = THREE.MathUtils.lerp(car.spec.steerLock[0], car.spec.steerLock[1], THREE.MathUtils.smoothstep(Math.abs(sp), 3, 62));
     const steer = THREE.MathUtils.clamp(ang / lock, -1, 1);
 
     // ---------------- speed ----------------
@@ -150,7 +170,8 @@ export class BotDriver {
     const horizon = Math.min(tr.n / 3, Math.round(260 / tr.ds));
     for (let j = 0; j < horizon; j += 2) {
       const dist = j * tr.ds;
-      const v = Math.sqrt((this.maxSpeedAt(i + j, target) * (crowded ? 0.97 : 1)) ** 2 + 2 * (this.oval ? 8.5 : 7) * this.skill * this.car.gripScale * dist);
+      const vc = this.maxSpeedAt(i + j, target) * (crowded ? 0.97 : 1);
+      const v = Math.sqrt(vc ** 2 + 2 * this.decelAt(Math.min(vc, 90)) * this.skill * this.car.gripScale * dist);
       vT = Math.min(vT, v);
     }
     vT *= 0.97 + 0.03 * this.skill;
@@ -164,7 +185,7 @@ export class BotDriver {
       const gap = di * tr.ds;
       if (gap < 3 || gap > 60 || Math.abs(o.d - d) > (o.dead ? 3.4 : 2.4)) continue;
       const vb = o.vel.length();
-      vT = Math.min(vT, Math.sqrt(Math.max(0, vb * vb + 2 * 6 * this.car.gripScale * (gap - 8))));
+      vT = Math.min(vT, Math.sqrt(Math.max(0, vb * vb + 2 * 6 * this.gripK * this.car.gripScale * (gap - 8))));
     }
     vT = Math.min(vT, raceSpeedLimit);
     const err = vT - sp;

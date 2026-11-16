@@ -1,10 +1,14 @@
 /** Local player profile + settings, persisted in localStorage (guarded). */
+import { DEFAULT_CAR, type Series } from '../vehicle/catalog';
+
 export type Quality = 'low' | 'medium' | 'high' | 'ultra';
 
 export interface Profile {
   nickname: string;
   carNumber: number;
   color: string;
+  /** Picked car per series. */
+  cars: Record<Series, string>;
 }
 
 export interface Settings {
@@ -38,7 +42,10 @@ export const profile: Profile = load('sct.profile', {
   nickname: '',
   carNumber: 10 + Math.floor(Math.random() * 89),
   color: LIVERY_COLORS[Math.floor(Math.random() * LIVERY_COLORS.length)],
+  cars: { ...DEFAULT_CAR },
 });
+// profiles saved before car choice existed (or with a removed car) get valid picks
+profile.cars = { ...DEFAULT_CAR, ...(profile.cars ?? {}) };
 export const settings: Settings = load('sct.settings', {
   quality: 'high' as Quality,
   units: 'mph' as const,

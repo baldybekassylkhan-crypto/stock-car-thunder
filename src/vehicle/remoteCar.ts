@@ -1,14 +1,12 @@
 import * as THREE from 'three';
 import { RAPIER, GROUP_CAR, type PhysicsWorld } from '../physics/world';
-import { buildCarModel, CAR_COM_HEIGHT, type CarVisual, type PartName } from './carModel';
+import type { CarVisual, PartName } from './carModel';
+import { buildCarModel } from './models';
+import { carSpec, type CarSpec } from './catalog';
 import { buildLod } from './carLod';
 import type { CarState } from '../net/codec';
 import { charCar, hidePart } from '../damage/visual';
 
-const HULL: [number, number, number][] = [
-  [0.96, -0.25, 1.85], [0.96, -0.25, -1.8], [0.92, -0.18, 2.62], [0.92, 0.12, 2.64], [0.92, -0.16, -2.62], [0.92, 0.5, -2.62],
-  [0.96, 0.32, 1.9], [0.96, 0.48, -2.4], [0.66, 0.42, 1.05], [0.68, 0.84, 0.05], [0.68, 0.86, -0.85], [0.68, 0.5, -1.9],
-];
 
 interface Snap { t: number; s: CarState }
 
@@ -37,12 +35,12 @@ export class RemoteCar {
   readonly goneApplied = new Set<PartName>();
   static readonly DELAY = 0.12;
 
-  constructor(private physics: PhysicsWorld, readonly slot: number, opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion) {
-    this.visual = buildCarModel(opts);
+  constructor(private physics: PhysicsWorld, readonly slot: number, opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, readonly spec: CarSpec = carSpec(undefined)) {
+    this.visual = buildCarModel(opts, spec);
     buildLod(this.visual);
     this.body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(pos.x, pos.y, pos.z).setRotation(quat));
     const hull: number[] = [];
-    for (const [x, y, z] of HULL) hull.push(x, y, z, -x, y, z);
+    for (const [x, y, z] of spec.hull) hull.push(x, y, z, -x, y, z);
     this.collider = physics.world.createCollider(
       (RAPIER.ColliderDesc.roundConvexHull(new Float32Array(hull), 0.03) ?? RAPIER.ColliderDesc.cuboid(0.95, 0.5, 2.6)).setFriction(0.35).setCollisionGroups(GROUP_CAR),
       this.body,
@@ -92,7 +90,7 @@ export class RemoteCar {
     const s = this.latest;
     const v = this.visual;
     v.root.quaternion.copy(this.quat);
-    v.root.position.copy(this.pos).add(_a.set(0, -CAR_COM_HEIGHT, 0).applyQuaternion(this.quat));
+    v.root.position.copy(this.pos).add(_a.set(0, -v.comHeight, 0).applyQuaternion(this.quat));
     if (!s) return;
     this.wheelAngle += s.omega * dt;
     for (let i = 0; i < 4; i++) {

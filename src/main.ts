@@ -4,6 +4,7 @@ import { Session, type GridEntry } from './core/session';
 import { profile, settings, makeRoomCode } from './core/profile';
 import { Room, type RoomSettings } from './net/room';
 import { MAPS } from './tracks/maps';
+import { carSpec, carsOf } from './vehicle/catalog';
 import { MAX_GRID } from './net/transport';
 import {
   nicknameScreen, mainMenu, loadingScreen, pauseScreen, garageScreen, clearUI, lobbyScreen, resultsScreen,
@@ -19,7 +20,7 @@ let session: Session | null = null;
 let room: Room | null = null;
 const roomParam = new URLSearchParams(location.search).get('room') ?? undefined;
 
-const DEFAULT_SETTINGS = (): RoomSettings => ({ map: 'sunvale', laps: 10, damage: 'realistic', bots: 5, weather: 'dry' });
+const DEFAULT_SETTINGS = (): RoomSettings => ({ map: 'sunvale', laps: 10, damage: 'realistic', bots: 5, weather: 'dry', series: 'stock', sameCar: '' });
 const BOT_COLORS = [
   '#2b7de9', '#e9472b', '#14b48c', '#f0a020', '#9b3de0', '#e0e0e0', '#1a1a1a', '#e83e8c', '#5bc0eb', '#8bc34a',
   '#ff7f11', '#0b3d91', '#c81d25', '#2ec4b6', '#ffd23f', '#6a4c93', '#3a3a3a', '#f15bb5', '#00bbf9', '#9ef01a',
@@ -85,7 +86,11 @@ function showLobby() {
 
 /** Host: humans plus AI drivers in the free slots, in a shuffled starting order. */
 function buildGrid(r: Room): GridEntry[] {
-  const humans = r.humans.map((p) => ({ slot: p.slot, nickname: p.nickname, number: p.number, color: p.color, bot: false }));
+  const series = r.settings.series;
+  // a forced car (if valid for the series) overrides everyone's pick
+  const forced = r.settings.sameCar && carSpec(r.settings.sameCar).id === r.settings.sameCar && carSpec(r.settings.sameCar).series === series ? r.settings.sameCar : '';
+  const humans = r.humans.map((p) => ({ slot: p.slot, nickname: p.nickname, number: p.number, color: p.color, bot: false, car: forced || carSpec(p.cars?.[series], series).id }));
+  const pool = carsOf(series);
   const used = new Set(humans.map((h) => h.slot));
   const bots: GridEntry[] = [];
   const count = Math.min(r.settings.bots, MAX_GRID - humans.length);
@@ -98,7 +103,8 @@ function buildGrid(r: Room): GridEntry[] {
   for (let i = 0; i < count; i++) {
     while (used.has(slot)) slot++;
     used.add(slot);
-    bots.push({ slot, nickname: BOT_NAMES[i % BOT_NAMES.length], number: numbers[i], color: BOT_COLORS[i % BOT_COLORS.length], bot: true });
+    // AI drivers: an even mix of the series' cars, shuffled by slot
+    bots.push({ slot, nickname: BOT_NAMES[i % BOT_NAMES.length], number: numbers[i], color: BOT_COLORS[i % BOT_COLORS.length], bot: true, car: forced || pool[(i * 7 + slot * 3) % pool.length].id });
   }
   const all = [...humans, ...bots];
   for (let i = all.length - 1; i > 0; i--) {

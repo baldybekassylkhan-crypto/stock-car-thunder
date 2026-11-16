@@ -131,7 +131,7 @@ export class Hud {
     const spd = Math.abs(t.speed) * (mph ? 2.23694 : 3.6);
     e.spd.innerHTML = `${Math.round(spd)}<small>${mph ? 'MPH' : 'KM/H'}</small>`;
     e.gear.textContent = t.gear === -1 ? 'R' : String(t.gear);
-    e.rpm.style.width = `${Math.min(100, (t.rpm / 9400) * 100)}%`;
+    e.rpm.style.width = `${Math.min(100, (t.rpm / (t.maxRpm * 1.02)) * 100)}%`;
     e.rpmwrap.classList.toggle('limit', t.limiter);
     e.pos.innerHTML = `P${s.position}<small>/${s.cars}</small>`;
     e.lap.textContent = s.totalLaps ? `LAP ${Math.min(s.totalLaps, Math.max(1, s.lap))} / ${s.totalLaps}` : s.lap ? `LAP ${s.lap}` : 'OUT LAP';

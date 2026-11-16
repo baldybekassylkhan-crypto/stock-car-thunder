@@ -3,6 +3,7 @@ import { LOD_DISTANCE, updateLod } from '../vehicle/carLod';
 import { Renderer } from '../render/renderer';
 import { PhysicsWorld, initPhysics, RAPIER, RAY_TRACK_ONLY } from '../physics/world';
 import { Car, type CarContact } from '../vehicle/car';
+import { carSpec, PART_LABEL, type CarSpec } from '../vehicle/catalog';
 import { RemoteCar } from '../vehicle/remoteCar';
 import { BotDriver, type Traffic } from '../vehicle/bot';
 import { CameraRig, CAM_LABEL } from '../render/cameras';
@@ -26,6 +27,8 @@ export interface GridEntry {
   number: number;
   color: string;
   bot: boolean;
+  /** Car id from the catalogue (catalog.ts). */
+  car: string;
 }
 
 export interface SessionCallbacks {
@@ -37,7 +40,6 @@ export interface SessionCallbacks {
 interface BotEntry { car: Car; ai: BotDriver; input: DriverInput; penalty: number; limit: number }
 interface DentMsg { l: number[]; d: number[]; m: number }
 
-const ENGINE_BAY = new THREE.Vector3(0, 0.85, 1.7);
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 
@@ -131,14 +133,15 @@ export class Session {
       const gp = gridPos(g.slot);
       const pl = tr.placement(gp.i, gp.d, 0.62);
       const opts = { number: g.number, color: g.color, seed: g.number + g.slot * 7 };
+      const spec = carSpec(g.car);
       if (g.slot === this.self) {
-        this.car = this.makeCar(opts, pl.pos, pl.quat);
+        this.car = this.makeCar(opts, pl.pos, pl.quat, spec);
       } else if (g.bot && this.isHost) {
-        const car = this.makeCar(opts, pl.pos, pl.quat);
+        const car = this.makeCar(opts, pl.pos, pl.quat, spec);
         const skill = 0.9 + ((g.slot * 37) % 10) / 100;
         this.bots.set(g.slot, { car, ai: new BotDriver(car, tr, skill, this.map.oval, g.slot), input: { steer: 0, throttle: 0, brake: 0, shiftUp: false, shiftDown: false }, penalty: 0, limit: 0 });
       } else {
-        const rc = new RemoteCar(this.physics, g.slot, opts, pl.pos, pl.quat);
+        const rc = new RemoteCar(this.physics, g.slot, opts, pl.pos, pl.quat, spec);
         this.remotes.set(g.slot, rc);
         this.carColliders.add(rc.collider.handle);
         this.r.scene.add(rc.visual.root);
@@ -170,6 +173,7 @@ export class Session {
     this.hud.show(true);
     try {
       this.audio = new EngineAudio(settings.volume);
+      this.audio.cylinders = this.car.spec.cylinders;
       this.audio.resume();
     } catch {
       this.audio = null;
@@ -187,8 +191,8 @@ export class Session {
     }
   }
 
-  private makeCar(opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion) {
-    const car = new Car(this.physics, opts, pos, quat, this.cfg.damage);
+  private makeCar(opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, spec: CarSpec) {
+    const car = new Car(this.physics, opts, pos, quat, this.cfg.damage, spec);
     car.gripScale = this.map.gripScale;
     car.wiperOn = this.map.rain;
     this.carColliders.add(car.collider.handle);
@@ -276,7 +280,7 @@ export class Session {
         if (!old || !g) break;
         this.carColliders.delete(old.collider.handle);
         old.dispose(this.r.scene);
-        const rc = new RemoteCar(this.physics, p.s, { number: g.number, color: g.color, seed: g.number + g.slot * 7 }, old.pos, old.quat);
+        const rc = new RemoteCar(this.physics, p.s, { number: g.number, color: g.color, seed: g.number + g.slot * 7 }, old.pos, old.quat, carSpec(g.car));
         this.remotes.set(p.s, rc);
         this.carColliders.add(rc.collider.handle);
         this.r.scene.add(rc.visual.root);
@@ -365,7 +369,7 @@ export class Session {
     this.physics.world.removeRigidBody(old.body);
     this.r.scene.remove(old.visual.root);
     const g = this.entry(this.self)!;
-    this.car = this.makeCar({ number: g.number, color: g.color, seed: g.number + g.slot * 7 }, pl.pos, pl.quat);
+    this.car = this.makeCar({ number: g.number, color: g.color, seed: g.number + g.slot * 7 }, pl.pos, pl.quat, carSpec(g.car));
     this.applyAssists();
     this.spectating = -1;
     this.destroyedAt = -1;
@@ -439,7 +443,7 @@ export class Session {
     const v = new THREE.Vector3(lv.x, lv.y, lv.z).multiplyScalar(0.85).add(new THREE.Vector3((Math.random() - 0.5) * 6, 2 + Math.random() * 4, (Math.random() - 0.5) * 6));
     this.releasePart(car.visual, part, v);
     this.room.sendEvent('detach', { s: slot, part, v: v.toArray().map((x) => +x.toFixed(2)) });
-    if (slot === this.self) this.flash(part.startsWith('wheel') ? 'LOST A WHEEL!' : `${part.replace(/[LRF]$/, '').toUpperCase()} GONE`, 1.5, '#ff6b6b');
+    if (slot === this.self) this.flash(part.startsWith('wheel') ? 'LOST A WHEEL!' : `${PART_LABEL[car.spec.body][part] ?? part.toUpperCase()} GONE`, 1.5, '#ff6b6b');
   }
 
   private releasePart(v: CarVisual, part: PartName, vel: THREE.Vector3) {
@@ -514,7 +518,7 @@ export class Session {
 
   // ====================================================================== effects per car
   private carEffects(dt: number, slot: number, v: CarVisual, speed: number, vel: THREE.Vector3, smoke: number, fire: number, wheels?: Car['wheels'], gone?: boolean[]) {
-    const bay = ENGINE_BAY.clone().applyMatrix4(v.root.matrixWorld);
+    const bay = v.engineBay.clone().applyMatrix4(v.root.matrixWorld);
     const rate = (key: string, perSec: number, fn: () => void) => {
       const a = (this.emitAcc.get(key) ?? 0) + perSec * dt;
       let n = Math.floor(a);

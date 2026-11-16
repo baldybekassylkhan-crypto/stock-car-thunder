@@ -22,8 +22,8 @@ Multiplayer (up to 12 players per room, joined with a 6-character room code, plu
 |---|---|---|
 | A | Stock-car damage fix: contact is cosmetic, only big crashes wreck cars; steadier AI on banked turns | ✅ done |
 | B | 12 human players, up to 32 cars with AI; LOD, batched snapshots, compact leaderboard | ✅ done |
-| C | Car choice in every race type | next |
-| D | Open-Wheel GP driving model | |
+| C | Car choice in every race type: 6 cars in 2 series, open-wheel body, lobby car picker | ✅ done |
+| D | Open-Wheel GP driving model | next |
 | E | Pit stops (both series) | |
 | F | Three new GP circuits | |
 
@@ -68,6 +68,32 @@ Gamepad: left stick steers, RT/LT are throttle/brake, LB/RB shift, Y changes cam
 Up to 12 people can join a room, and the host can fill the grid with AI drivers up to 32 cars. Connections go directly browser-to-browser over WebRTC.
 A few strict corporate or mobile networks block direct WebRTC connections; on those, players may not be able to connect (there is no relay server).
 
+## Car choice
+
+The host picks the **series** for the room, and every driver picks a car from it in the lobby (single
+races too). The picker shows a rotating 3D preview, stat bars, top speed, power and weight. The host
+can also set **Cars → All drive: …** so everyone races the same car. AI drivers get an even mix of
+the series' cars. Picks are saved per series in your profile.
+
+| Series | Car | Character |
+|---|---|---|
+| Stock Car | Vanguard SR | Balanced: the reference car |
+| Stock Car | Ironhide 427 | Torque: strong off the corners, best on short tracks, heavier |
+| Stock Car | Stiletto Aero | Aero: low drag, fastest on the superspeedway, loose in traffic |
+| Open-Wheel GP | Apex GP-1 | Balanced |
+| Open-Wheel GP | Titan HD-7 | High downforce: quickest on twisty circuits, slow on straights |
+| Open-Wheel GP | Falcon LD-3 | Low drag: fastest in a straight line, nervous in fast corners |
+
+Open-wheel cars weigh 800 kg with about 1,000 hp, an 8-speed gearbox and four times the downforce of
+a stock car. In AI testing they lap Iron Hollow in about 14 s (stock 17 s), Cedar Ridge in about 71 s
+(stock 84 s) and Sunvale in about 42 s (stock 45 s). All names are fictional.
+
+Every car is a full spec in `src/vehicle/catalog.ts` (mass, springs, tyres, torque curve, gearbox,
+aero, geometry, collision hull, damage profile); `src/vehicle/car.ts` reads all of its physics from
+it. The open-wheel body is built in `src/vehicle/openWheelModel.ts` and reuses the stock car's damage
+part slots (front wing, nose cone, sidepods, engine cover, rear wing, diffuser, wheels), so damage,
+debris and networking work the same for both bodies.
+
 ## Damage and crashes
 
 - **Bodywork crumples** where the car is hit (vertex deformation). Bumpers, splitter, hood, spoiler, side skirts and even wheels come off and become physical debris.
@@ -111,5 +137,6 @@ A few strict corporate or mobile networks block direct WebRTC connections; on th
 In `npm run dev`, the browser console has `__run(...)` (an autopilot that steps the physics for N
 seconds) and `__race(seconds)` (an AI drives your car and the whole race is fast-forwarded). See
 `src/dev/autotest.ts`. `await __quickRace(map, damage, bots)` starts a single race through the lobby, and
-`__damageTest(seconds)` fast-forwards an all-AI race and reports wrecks. All of these are stripped from production builds. To test multiplayer locally, open two
+`__damageTest(seconds)` fast-forwards an all-AI race and reports wrecks. `__quickRace` also takes a series and a car id
+(`await __quickRace('cedarridge', 'realistic', 8, 5, 'gp', 'gp-downforce')` puts everyone in that car). All of these are stripped from production builds. To test multiplayer locally, open two
 browser tabs, host in one and join with the code in the other.
