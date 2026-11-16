@@ -499,7 +499,7 @@ export class Session {
       const inv = new THREE.Quaternion(r.x, r.y, r.z, r.w).invert();
       const local = p.clone().sub(c.position).applyQuaternion(inv).setLength(1.2);
       const inward = dir.clone().negate().applyQuaternion(inv);
-      const res = c.damage.impact(local, inward, 5500 * k, false);
+      const res = c.damage.impact(local, inward, 16000 * k, false);
       if (res.dent) dentCar(c.visual, local, inward, res.dent);
       for (const part of res.detached) this.detachOwned(s, c, part);
       if (res.explode) c.pendingExplode = true;

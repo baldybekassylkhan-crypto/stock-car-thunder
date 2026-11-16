@@ -112,3 +112,62 @@ export function installStartTest(getSession: () => Session | null) {
     return JSON.stringify({ duringCountdown, phaseAfter: S.race.phase, flag: S.race.flag, after, laps: S.race.st.map((s: Any) => s.lap) });
   };
 }
+
+import { CarDamage } from '../damage/damage';
+
+/**
+ * `__damageTest(seconds)`: fast-forwards a pack race (all cars AI-driven) and reports how many cars
+ * were destroyed, plus a histogram of impacts by strength and what destroyed each car.
+ */
+export function installDamageTest(getSession: () => Session | null) {
+  (window as Any).__CarDamage = CarDamage;
+  (window as Any).__damageTest = (seconds = 300) => {
+    const S = getSession() as Any;
+    const hist: Record<string, number> = {};
+    const causes: string[] = [];
+    let maxJ = 0;
+    let smallHitKills = 0;
+    const seen = new Set<CarDamage>();
+    CarDamage.onImpact = (J, carHit, res, d) => {
+      const b = `${carHit ? 'car' : 'wall'}<${J < 500 ? 500 : J < 1000 ? 1000 : J < 2000 ? 2000 : J < 4000 ? 4000 : J < 8000 ? 8000 : 'max'}`;
+      hist[b] = (hist[b] ?? 0) + 1;
+      maxJ = Math.max(maxJ, J);
+      if ((d.destroyed || res.explode) && !seen.has(d)) {
+        seen.add(d);
+        if (J < (carHit ? d.profile.carJ0 : d.profile.wallJ0) * 4) smallHitKills++;
+        causes.push(`${carHit ? 'car' : 'wall'} J=${Math.round(J)} sev=${res.severity.toFixed(2)} eng=${d.engine.toFixed(2)} int=${d.integrity.toFixed(2)}${res.explode ? ' DEADLY' : ''}`);
+      }
+    };
+    const out = JSON.parse((window as Any).__race(seconds));
+    CarDamage.onImpact = undefined;
+    const cars = [S.car, ...[...S.bots.values()].map((b: Any) => b.car)];
+    const destroyed = cars.filter((c: Any) => c.damage.destroyed).length;
+    return JSON.stringify({
+      // a clean pack race should wreck well under one car, and never from a light contact
+      pass: destroyed <= 1 && smallHitKills === 0,
+      seconds, cars: cars.length, destroyed, smallHitKills,
+      exploded: cars.filter((c: Any) => c.damage.exploded).length,
+      punctures: cars.reduce((a: number, c: Any) => a + c.damage.punctured.filter(Boolean).length, 0),
+      minIntegrity: Math.min(...cars.map((c: Any) => c.damage.integrity)).toFixed(2),
+      maxJ: Math.round(maxJ), hist, causes, laps: out.standings.slice(0, 3),
+    });
+  };
+}
+
+/** `await __quickRace(map, damage, bots)`: from the main menu, start a single race through the lobby UI. */
+export function installQuickRace(getSession: () => Session | null) {
+  (window as Any).__quickRace = async (map = 'sunvale', damage = 'realistic', bots = 9, laps = 10) => {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const btn = (pred: (t: string) => boolean) => [...document.querySelectorAll('button')].find((b) => pred(b.textContent ?? ''));
+    btn((t) => t.startsWith('Single'))?.click();
+    await wait(300);
+    document.querySelector<HTMLElement>(`.map-opt[data-id="${map}"]`)?.click();
+    const set = (id: string, v: string) => { const el = document.querySelector<HTMLSelectElement>(`#${id}`)!; el.value = v; el.dispatchEvent(new Event('change')); };
+    set('dmg', damage); set('laps', String(laps)); set('bots', String(bots));
+    btn((t) => t === 'Start race')?.click();
+    for (let i = 0; i < 80 && !(getSession() as Any)?.bots?.size; i++) await wait(250);
+    await wait(3500);
+    const S = getSession() as Any;
+    return `${S.map.def?.id ?? map} ${S.cfg.damage} bots=${S.bots.size}`;
+  };
+}

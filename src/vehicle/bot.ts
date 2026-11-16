@@ -13,6 +13,9 @@ export interface Traffic {
 }
 
 const G = 9.81;
+/** Oval lane limits (m from the inside edge / from the outside wall) so bots don't ride the wall. */
+const OVAL_IN = 2.5;
+const OVAL_OUT = 3.6;
 
 /**
  * AI driver. Follows a lane with a feed-forward + feedback steering controller, picks its speed
@@ -26,11 +29,13 @@ export class BotDriver {
   private laneTarget: number;
   private passTimer = 0;
   private stuckT = 0;
+  /** Smoothed throttle: no snapping off the gas mid-corner (lift-off oversteer). */
+  private thr = 0;
   wantsReset = false;
 
   constructor(readonly car: Car, private track: Track, private skill: number, private oval: boolean, seed: number) {
     const r = ((seed * 9301 + 49297) % 233280) / 233280;
-    this.lane = oval ? 4 + r * (track.width - 8) : track.width / 2;
+    this.lane = oval ? OVAL_IN + 1.5 + r * (track.width - OVAL_IN - OVAL_OUT - 3) : track.width / 2;
     this.laneTarget = this.lane;
   }
 
@@ -87,7 +92,7 @@ export class BotDriver {
       if (closing > 0.5 || gapAhead < 14 || blocker.dead) {
         // choose a side with room
         const off = blocker.dead ? 4.6 : 3.6;
-        const sides = [blocker.d - off, blocker.d + off].filter((x) => x > 2 && x < tr.width - 2);
+        const sides = [blocker.d - off, blocker.d + off].filter((x) => x > (this.oval ? OVAL_IN : 2) && x < tr.width - (this.oval ? OVAL_OUT : 2));
         const free = sides.filter((x) => !traffic.some((o) => {
           let di = o.i - i;
           if (di < -tr.n / 2) di += tr.n;
@@ -103,7 +108,7 @@ export class BotDriver {
     }
     if (this.oval) target = this.laneTarget;
     else if (this.passTimer > 0) target = THREE.MathUtils.lerp(target, this.laneTarget, 0.7);
-    target = THREE.MathUtils.clamp(target, 2, tr.width - 2);
+    target = this.oval ? THREE.MathUtils.clamp(target, OVAL_IN, tr.width - OVAL_OUT) : THREE.MathUtils.clamp(target, 2, tr.width - 2);
 
     // ---------------- steering ----------------
     const T = tr.T[tr.wrap(i + 3)];
@@ -114,7 +119,14 @@ export class BotDriver {
     let k = 0;
     for (let j = 0; j < 10; j++) k += tr.curvature[tr.wrap(i + j * 2)];
     k /= 10;
-    const ang = -2.8 * k - cr * 0.65 - (d - target) * (this.oval ? 0.006 : 0.012) - latV * 0.014;
+    let ang = -2.8 * k - cr * 0.65 - (d - target) * (this.oval ? 0.006 : 0.012) - latV * 0.014;
+    // wall avoidance: steer away harder the closer the car drifts to either edge
+    const wallGap = tr.width - d;
+    if (wallGap < 2.8) ang -= (2.8 - wallGap) * 0.025;
+    if (d < 1.2) ang += (1.2 - d) * 0.025;
+    // yaw damping: countersteer when the car rotates faster (or slower) than the corner needs
+    const yawErr = car.body.angvel().y - sp * tr.curvature[i];
+    ang += THREE.MathUtils.clamp(yawErr, -1.5, 1.5) * 0.12;
     const lock = THREE.MathUtils.lerp(0.58, 0.07, THREE.MathUtils.smoothstep(Math.abs(sp), 3, 62));
     const steer = THREE.MathUtils.clamp(ang / lock, -1, 1);
 
@@ -127,6 +139,8 @@ export class BotDriver {
       vT = Math.min(vT, v);
     }
     vT *= 0.97 + 0.03 * this.skill;
+    // drifting toward the outside wall: lift a little
+    if (wallGap < 3) vT *= 0.985 - Math.max(0, 3 - wallGap) * 0.01;
     // don't drive into the back of a slower car: keep a braking gap to anything ahead in our line
     for (const o of traffic) {
       let di = o.i - i;
@@ -142,6 +156,10 @@ export class BotDriver {
     let throttle = THREE.MathUtils.clamp(err * 0.5, 0, 1);
     let brake = THREE.MathUtils.clamp(-err * 0.22, 0, 1);
     if (Math.abs(sp) < 3 && raceSpeedLimit > 1) { throttle = 1; brake = 0; }
+    // ease off the gas instead of snapping shut, unless we need the brakes
+    if (brake > 0.05) this.thr = 0;
+    else this.thr = throttle < this.thr ? Math.max(throttle, this.thr - dt * 2.5) : throttle;
+    throttle = this.thr;
 
     // stuck detection → ask for a reset
     if (raceSpeedLimit > 5 && Math.abs(sp) < 2 && !car.damage.destroyed && car.damage.engineWear < 1) this.stuckT += dt;

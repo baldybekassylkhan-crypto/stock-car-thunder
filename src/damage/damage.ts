@@ -44,11 +44,48 @@ export interface ImpactResult {
   severity: number;
 }
 
-const MULT: Record<DamageLevel, number> = { off: 0.6, realistic: 1, brutal: 2.1 };
-/** Velocity change (m/s) within ~0.3 s that destroys a car outright. */
-const DEADLY_DV: Record<DamageLevel, number> = { off: Infinity, realistic: 34, brutal: 23 };
+/**
+ * How tough a class of car is. Impacts below the thresholds only scuff paint; above them damage
+ * grows faster than linearly, so taps stay cosmetic and only big hits really hurt.
+ */
+export interface DamageProfile {
+  /** Impulse (N·s) below which a wall hit does nothing. */
+  wallJ0: number;
+  /** Impulse (N·s) below which car-to-car contact does nothing (rubbing, bump drafting). */
+  carJ0: number;
+  /** Impulse above the threshold that counts as one unit of damage. */
+  refJ: number;
+  /** Damage curve exponent (>1 = small hits matter less, big hits more). */
+  curve: number;
+  /** Single-hit severity that ruptures fuel/oil lines and starts a fire. */
+  igniteSeverity: number;
+  /** Scales how easily bolt-on parts (wings, bumpers, spoiler) come loose and fall off. */
+  partFragility: number;
+  /** Scales suspension damage per hit. */
+  suspensionFragility: number;
+}
+
+export const DAMAGE_PROFILES = {
+  // 1550 kg: one damage unit ≈ a 33 mph (15 m/s) full stop into the wall; fire needs ≈ 75+ mph
+  stock: { wallJ0: 1200, carJ0: 1800, refJ: 23000, curve: 1.35, igniteSeverity: 3.2, partFragility: 1, suspensionFragility: 1 },
+  /** Open-wheel cars (~800 kg) shed wings and suspension easily, but the tub is very strong and rarely burns. */
+  openWheel: { wallJ0: 600, carJ0: 900, refJ: 12000, curve: 1.3, igniteSeverity: 4.5, partFragility: 1.8, suspensionFragility: 1.6 },
+} satisfies Record<string, DamageProfile>;
+
+const MULT: Record<DamageLevel, number> = { off: 0.6, realistic: 1, brutal: 1.8 };
+/** Brutal also lowers the thresholds and the severity needed to start a fire. */
+const THRESH: Record<DamageLevel, number> = { off: 1, realistic: 1, brutal: 0.7 };
+const IGNITE: Record<DamageLevel, number> = { off: Infinity, realistic: 1, brutal: 0.65 };
+/** Velocity change (m/s) within ~0.1 s that destroys a car outright: a top-speed head-on into the wall. */
+const DEADLY_DV: Record<DamageLevel, number> = { off: Infinity, realistic: 40, brutal: 30 };
+/** Only hits this many times the threshold count toward the deadly velocity-change window. */
+const HARD_HIT = 4;
+/** A corner needs a hit at least this strong before a puncture is possible. */
+const PUNCTURE_MIN = 0.12;
 
 export class CarDamage {
+  /** Dev hook: called for every impact that passes the threshold (used by the damage regression test). */
+  static onImpact?: (impulse: number, carHit: boolean, res: ImpactResult, d: CarDamage) => void;
   panels: Record<PanelName, number> = Object.fromEntries(PANEL_NAMES.map((p) => [p, 0])) as Record<PanelName, number>;
   engine = 1; // health 0..1
   cooling = 1;
@@ -66,7 +103,7 @@ export class CarDamage {
   exploded = false;
   private recentDV = 0;
 
-  constructor(readonly level: DamageLevel, private mass: number) {}
+  constructor(readonly level: DamageLevel, private mass: number, readonly profile: DamageProfile = DAMAGE_PROFILES.stock) {}
 
   get mechanical() {
     return this.level !== 'off';
@@ -111,7 +148,7 @@ export class CarDamage {
 
   /** Per-step update: temperature, fire progression. Returns true when the car should explode now. */
   tick(dt: number, rpm: number, speed: number): boolean {
-    this.recentDV *= Math.exp(-dt / 0.3);
+    this.recentDV *= Math.exp(-dt / 0.12); // one collision event, not a series of tumbles
     if (!this.mechanical || this.exploded) return false;
     // cooling: airflow helps, damaged radiator doesn't
     const working = this.engineWear < 1 ? rpm / 9000 : 0;
@@ -119,8 +156,7 @@ export class CarDamage {
     const cool = (14 + Math.min(1, speed / 60) * 20) * (0.45 + 0.55 * this.cooling);
     this.engineTemp = THREE.MathUtils.clamp(this.engineTemp + (heatIn - cool) * dt * 0.5, 85, 175);
     if (this.engineTemp > 145) this.engineWear = Math.min(1, this.engineWear + dt * 0.008);
-    // fire only comes from crash damage (ruptured fuel/oil lines), never from overheating alone
-    if (!this.destroyed && (this.engine < 0.1 || this.integrity <= 0.02)) this.ignite();
+    // fire only comes from big crashes (see impact), never from wear or overheating
     if (this.fire > 0) {
       this.fireTime += dt;
       this.fire = Math.min(1, this.fire + dt * 0.12);
@@ -143,12 +179,13 @@ export class CarDamage {
   impact(local: THREE.Vector3, inward: THREE.Vector3, impulse: number, carHit: boolean): ImpactResult {
     const res: ImpactResult = { dent: 0, detached: [], punctured: [], explode: false, severity: 0 };
     if (this.exploded) return res;
-    const J0 = 240;
+    const pr = this.profile;
+    const J0 = (carHit ? pr.carJ0 : pr.wallJ0) * THRESH[this.level];
     if (impulse < J0) return res;
-    this.recentDV += impulse / this.mass;
-    const e = ((impulse - J0) / 8500) * MULT[this.level] * (carHit ? 0.7 : 1);
+    if (impulse > J0 * HARD_HIT) this.recentDV += impulse / this.mass;
+    const e = Math.pow((impulse - J0) / pr.refJ, pr.curve) * MULT[this.level] * (carHit ? 0.7 : 1);
     res.severity = e;
-    res.dent = Math.min(0.22, e * 0.12);
+    res.dent = Math.min(0.22, Math.pow(e, 0.8) * 0.12);
 
     // distribute over panels by proximity
     const w: Record<string, number> = {};
@@ -167,6 +204,7 @@ export class CarDamage {
     const loosen = (part: PartName, value: number, looseAt: number, goneAt: number) => {
       const st = this.parts[part] ?? 'ok';
       if (st === 'gone') return;
+      value *= pr.partFragility;
       if (value >= goneAt) { this.parts[part] = 'gone'; res.detached.push(part); }
       else if (value >= looseAt) this.parts[part] = 'loose';
     };
@@ -179,22 +217,28 @@ export class CarDamage {
     loosen('skirtR', this.panels.doorR, 0.5, 0.85);
 
     if (this.mechanical) {
-      this.engine = Math.max(0, this.engine - e * (w.bumperF * 0.35 + w.hood * 0.5 + (w.fenderFL + w.fenderFR) * 0.12 + 0.02));
+      // only hits to the nose reach the engine bay
+      this.engine = Math.max(0, this.engine - e * (w.bumperF * 0.45 + w.hood * 0.6 + (w.fenderFL + w.fenderFR) * 0.06));
       this.cooling = Math.max(0, this.cooling - e * (w.bumperF * 0.4 + w.hood * 0.15));
       this.steering = Math.max(0, this.steering - e * (w.fenderFL + w.fenderFR) * 0.35);
       for (let i = 0; i < 4; i++) {
         const cw = CORNER_PANELS[i].reduce((a, p, k) => a + w[p] * (k === 0 ? 1 : 0.25), 0);
-        const hit = e * cw;
+        const hit = e * cw * pr.suspensionFragility;
         if (hit < 0.02) continue;
         this.corner[i] -= hit * 0.9;
         this.toe[i] += (Math.random() - 0.5) * hit * 0.05 + (i % 2 === 0 ? -1 : 1) * hit * 0.012;
-        if (!this.punctured[i] && Math.random() < hit * 0.9) { this.punctured[i] = true; res.punctured.push(i); }
+        if (!this.punctured[i] && hit > PUNCTURE_MIN && Math.random() < (hit - PUNCTURE_MIN) * 0.6) { this.punctured[i] = true; res.punctured.push(i); }
         const wheel = `wheel${i}` as PartName;
         if (this.corner[i] < -0.15 && this.parts[wheel] !== 'gone') { this.parts[wheel] = 'gone'; res.detached.push(wheel); }
       }
+      const ignite = pr.igniteSeverity * IGNITE[this.level];
       if (this.recentDV > DEADLY_DV[this.level]) res.explode = true;
-      else if (this.integrity <= 0 || this.engine <= 0.05) this.ignite();
+      // fire needs one massive hit, or a big hit on a car that is already wrecked
+      else if (e >= ignite || (e >= ignite * 0.25 && (this.engine <= 0.05 || this.integrity <= 0))) this.ignite();
+      // an engine knocked out by smaller hits just dies (smoke, no power) instead of burning
+      else if (this.engine <= 0.02) this.engineWear = 1;
     }
+    CarDamage.onImpact?.(impulse, carHit, res, this);
     return res;
   }
 }

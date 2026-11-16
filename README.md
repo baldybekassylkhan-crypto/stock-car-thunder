@@ -14,7 +14,18 @@ Multiplayer (up to 10 players per room, joined with a 6-character room code) use
 | 4 | Race logic: AI drivers, grid, rolling start, laps, positions, cautions, flags, results | ✅ done |
 | 5 | Damage: crumpling bodywork, parts flying off, mechanical damage, fire, explosions | ✅ done |
 | 6 | Iron Hollow (night short track) + Cedar Ridge (road course, optional rain) | ✅ done |
-| 7 | Graphics polish, recorded audio, 3D sound for other cars, optimisation | next |
+| 7 | Graphics polish, recorded audio, 3D sound for other cars, optimisation | later |
+
+### Update: Open-Wheel GP series (see `PROMPT-open-wheel-update.md`)
+
+| Milestone | What | State |
+|---|---|---|
+| A | Stock-car damage fix: contact is cosmetic, only big crashes wreck cars; steadier AI on banked turns | ✅ done |
+| B | 12 human players, up to 32 cars with AI | next |
+| C | Car choice in every race type | |
+| D | Open-Wheel GP driving model | |
+| E | Pit stops (both series) | |
+| F | Three new GP circuits | |
 
 ## Run locally
 
@@ -61,8 +72,11 @@ A few strict corporate or mobile networks block direct WebRTC connections; on th
 
 - **Bodywork crumples** where the car is hit (vertex deformation). Bumpers, splitter, hood, spoiler, side skirts and even wheels come off and become physical debris.
 - **Mechanical damage:** engine power, radiator/overheating (engines can blow), steering, wheel alignment (car pulls to one side), punctures, and lost aero.
-- **Fire and explosions:** heavy crash damage sets the car on fire, and it explodes a few seconds later. A single deadly hit (huge velocity change, e.g. head-on into the wall at speed) blows it up instantly: fireball, flying burning debris, a charred shell, and a blast that shoves and damages nearby cars.
-- **Damage setting:** *Realistic*, *Brutal* (about 2× damage, explodes easier) or *Off* (visual dents only).
+- **Tough like real stock cars:** door-to-door rubbing, bump drafting and light wall scrapes only scuff the paint. Damage starts above a threshold and grows faster than the hit strength, so it's the big crashes that hurt. Only hits to the nose damage the engine. An engine knocked out by smaller hits just dies (smoke, no power) instead of burning.
+- **Fire and explosions:** only from a single massive hit, or a big hit on a car that's already wrecked. On *Realistic* a car survives (badly damaged) hits up to about 85 mph straight into the wall. A head-on at around 100 mph or more blows it up instantly: fireball, flying burning debris, a charred shell, and a blast that shoves and damages nearby cars.
+- **Damage setting:** *Realistic*, *Brutal* (lower thresholds, ~1.8× damage, a ~70 mph head-on is fatal) or *Off* (visual dents only).
+- Damage profiles per car class live in `src/damage/damage.ts` (`DAMAGE_PROFILES`). The open-wheel profile sheds wings and suspension more easily but rarely burns.
+- Dev check: in `npm run dev`, start a race with `await __quickRace('sunvale', 'realistic', 9)`, then run `__damageTest(480)`. It fast-forwards an all-AI pack race and reports destroyed cars, an impact histogram and `pass`.
 - A wreck brings out the yellow flag. In a race a destroyed car is out (DNF) and you spectate; in free practice hold R for a new car.
 
 ## How it works
