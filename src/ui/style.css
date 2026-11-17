@@ -284,3 +284,6 @@ input.code { font-family: var(--font-display); font-size: 34px; letter-spacing: 
 .arena-reward .total { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; color: var(--accent); }
 .arena-reward .levelup { color: #3ad17a; font: 800 18px var(--font-display); }
 .arena-reward .unlock { color: #ffcc00; }
+
+.anytrack { float: right; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
+.anytrack input { vertical-align: middle; margin: 0 2px 0 0; }

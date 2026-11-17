@@ -129,7 +129,7 @@ export const PAIR_COOLDOWN = 0.35;
 export function collisionDamage(h: HitInput): number {
   if (h.closing < MIN_CLOSING) return 0;
   const massShare = h.wall ? 1 : (2 * h.otherMass) / (h.myMass + h.otherMass);
-  let raw = 2.0 * Math.pow(h.closing - MIN_CLOSING * 0.6, 1.8) * massShare;
+  let raw = 5.5 * Math.pow(h.closing - MIN_CLOSING * 0.6, 1.8) * massShare;
   if (h.wall) raw *= 0.55; // walls hurt, but ramming each other is what wins
   else if (h.otherFront) raw *= h.otherRam * (h.otherRamActive ? 1.6 : 1);
   // hitting with your own front is the safest way to hit

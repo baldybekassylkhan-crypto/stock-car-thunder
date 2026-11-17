@@ -80,6 +80,14 @@ function wireRoom(r: Room) {
   };
 }
 
+/** Host: stop the race / match for everyone and go back to the lobby. */
+function endToLobby(r: Room) {
+  r.inRace = false;
+  r.sendEvent('lobby-return', {});
+  endSession();
+  showLobby();
+}
+
 function showLobby() {
   if (!room) return;
   const r = room;
@@ -172,7 +180,7 @@ async function startArena(grid: ArenaEntry[], cfg: RoomSettings, seed: number) {
     onExit: () => leaveRoom(),
     onPause: (paused, api) => {
       if (!paused) return clearUI();
-      const show = () => pauseScreen({ ...api, settings: () => garageScreen(show, () => renderer.setQuality(settings.quality)) }, !r.offline);
+      const show = () => pauseScreen({ ...api, settings: () => garageScreen(show, () => renderer.setQuality(settings.quality)), endToLobby: r.isHost ? () => endToLobby(r) : undefined }, !r.offline);
       show();
     },
     onResults: (res) => {
@@ -204,7 +212,7 @@ async function startSession(grid: GridEntry[], cfg: RoomSettings) {
     onExit: () => leaveRoom(),
     onPause: (paused, api) => {
       if (!paused) return clearUI();
-      const show = () => pauseScreen({ ...api, settings: () => garageScreen(show, () => { session?.applyAssists(); renderer.setQuality(settings.quality); }) }, !r.offline);
+      const show = () => pauseScreen({ ...api, settings: () => garageScreen(show, () => { session?.applyAssists(); renderer.setQuality(settings.quality); }), endToLobby: r.isHost ? () => endToLobby(r) : undefined }, !r.offline);
       show();
     },
     onResults: (rows, g) => {

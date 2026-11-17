@@ -79,6 +79,8 @@ export interface MapDef {
   available: boolean;
   /** Rain is offered on this map. */
   weather?: boolean;
+  /** Which series race here (the lobby lists these for the room's series). */
+  series: ('stock' | 'gp')[];
   load(opts: MapLoadOptions): Promise<LoadedMap>;
 }
 
@@ -89,6 +91,7 @@ export const MAPS: MapDef[] = [
     subtitle: '2.5 mi tri-oval · 31° banking · desert, golden hour',
     swatch: 'linear-gradient(135deg,#f6a64a,#b4562a)',
     available: true,
+    series: ['stock'],
     load: () => import('./sunvale').then((m) => m.loadSunvale()),
   },
   {
@@ -97,6 +100,7 @@ export const MAPS: MapDef[] = [
     subtitle: '0.5 mi short track · 26° banking · night under lights',
     swatch: 'linear-gradient(135deg,#1d2a4a,#05070d)',
     available: true,
+    series: ['stock'],
     load: (o) => import('./ironhollow').then((m) => m.loadIronHollow(o)),
   },
   {
@@ -106,6 +110,37 @@ export const MAPS: MapDef[] = [
     swatch: 'linear-gradient(135deg,#4f6b4a,#22301f)',
     available: true,
     weather: true,
+    series: ['stock', 'gp'],
     load: (o) => import('./cedarridge').then((m) => m.loadCedarRidge(o)),
   },
+  {
+    id: 'harborpoint',
+    name: 'Harbor Point Street Circuit',
+    subtitle: '2.1 mi · walls, tunnel, hairpin · harbour at night',
+    swatch: 'linear-gradient(135deg,#1c2b4a,#e0a040)',
+    available: true,
+    series: ['gp'],
+    load: () => import('./gpCircuits').then((m) => m.loadHarborPoint()),
+  },
+  {
+    id: 'velmont',
+    name: 'Velmont Park',
+    subtitle: '3.2 mi · fast, hilly parkland · gravel & grass',
+    swatch: 'linear-gradient(135deg,#7fbf5a,#2e5a2a)',
+    available: true,
+    series: ['gp'],
+    load: () => import('./gpCircuits').then((m) => m.loadVelmontPark()),
+  },
+  {
+    id: 'desertring',
+    name: 'Desert Ring Al-Sahra',
+    subtitle: '3.3 mi · long straights, heavy braking · desert dusk',
+    swatch: 'linear-gradient(135deg,#f0a050,#7a3a20)',
+    available: true,
+    series: ['gp'],
+    load: () => import('./gpCircuits').then((m) => m.loadDesertRing()),
+  },
 ];
+
+/** Tracks the lobby offers for a series (all of them with "any track"). */
+export const mapsFor = (series: 'stock' | 'gp', any = false) => MAPS.filter((m) => any || m.series.includes(series));

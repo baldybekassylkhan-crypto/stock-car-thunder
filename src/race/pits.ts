@@ -77,24 +77,27 @@ export function damageWork(car: Car) {
   return Math.max(0, 1 - d.integrity) + (1 - d.engine) * 0.5 + lost * 0.08 + d.punctured.filter(Boolean).length * 0.05;
 }
 
+/** No stop ever takes longer than this (s): long waits aren't fun. */
+export const MAX_STOP = 10;
+
 /**
  * Stationary time for a stop (the host decides it, so everyone agrees). GP crews change four
- * tyres in ~2.5–3.4 s; stock cars change four tyres and refuel in ~12–15 s. Repairs add time, and
- * now and then a wheel gun sticks.
+ * tyres in ~2.5–3.4 s; stock cars change four tyres and refuel in ~7–9 s. Repairs and wing changes
+ * add time, and now and then a wheel gun sticks — but a stop never takes more than 10 s.
  */
 export function pitTime(spec: CarSpec, plan: PitPlan, work: number, rand: () => number = Math.random): number {
   let t = 0;
   if (spec.series === 'gp') {
     if (plan.tyre !== 'keep') t = 2.4 + rand() * 1.0;
-    if (plan.wing) t = Math.max(t, 0) + 5 + rand() * 2;
+    if (plan.wing) t += 2.5 + rand() * 1.5;
   } else {
-    const tyres = plan.tyre !== 'keep' ? 11.5 + rand() * 2.5 : 0;
-    const fuel = plan.fuel / 5.2; // gas can flow, in parallel with the tyres
+    const tyres = plan.tyre !== 'keep' ? 7 + rand() * 1.8 : 0;
+    const fuel = plan.fuel / 9; // fast fuel rig, in parallel with the tyres
     t = Math.max(tyres, fuel);
   }
-  if (plan.repair) t += 3 + Math.min(1.6, work) * 22;
-  if (plan.tyre !== 'keep' && rand() < 0.06) t += 1.5 + rand() * 3; // sticky wheel nut
-  return Math.max(1.5, t + 0.4);
+  if (plan.repair) t += 1.5 + Math.min(1.6, work) * 3.5;
+  if (plan.tyre !== 'keep' && rand() < 0.06) t += 0.8 + rand() * 1.2; // sticky wheel nut
+  return Math.min(MAX_STOP, Math.max(1.5, t + 0.3));
 }
 
 /** Bot strategy: should this car stop at the next opportunity, and with what plan? */

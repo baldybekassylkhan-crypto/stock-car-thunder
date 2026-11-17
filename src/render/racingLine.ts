@@ -65,6 +65,12 @@ export class RacingLine {
     }
   }
 
+  /** The player got a new car (respawn). */
+  setCar(car: Car) {
+    this.car = car;
+    this.ai = new BotDriver(car, this.track, 1, this.oval, 0);
+  }
+
   update(index: number) {
     const tr = this.track;
     // tyres warm up and wear, so refresh the targets now and then

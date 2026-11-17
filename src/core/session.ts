@@ -44,13 +44,16 @@ export interface SessionCallbacks {
   onExit: () => void;
 }
 
-interface BotEntry { car: Car; ai: BotDriver; input: DriverInput; penalty: number; limit: number }
+interface BotEntry { car: Car; ai: BotDriver; input: DriverInput; penalty: number; limit: number; deadAt?: number }
 interface DentMsg { l: number[]; d: number[]; m: number }
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 
 /** One race (or free practice) on one map, for every kind of participant. */
+/** A destroyed car comes back this many seconds later (races and practice). */
+const RESPAWN = 20;
+
 /** Bots farther than this from every human re-plan at half rate. */
 const FAR_BOT_M = 300;
 
@@ -417,10 +420,32 @@ export class Session {
     const g = this.entry(this.self)!;
     this.car = this.makeCar({ number: g.number, color: g.color, seed: g.number + g.slot * 7 }, pl.pos, pl.quat, carSpec(g.car), this.startCompound(g, carSpec(g.car)));
     this.applyAssists();
+    this.racingLine?.setCar(this.car);
     this.spectating = -1;
     this.destroyedAt = -1;
+    this.director?.noteReset(this.self, i);
     this.room.sendEvent('respawn', { s: this.self });
-    this.flash('NEW CAR', 1.5);
+    this.flash('BACK IN THE RACE', 1.8, '#3ad17a');
+  }
+
+  /** Host: a wrecked AI car comes back with a fresh car. */
+  private respawnBot(slot: number) {
+    const b = this.bots.get(slot);
+    const g = this.entry(slot);
+    if (!b || !g) return;
+    const old = b.car;
+    const tr = this.map.track;
+    const i = tr.nearest(old.position, b.ai.i || -1, 120);
+    const pl = tr.placement(i, tr.width * 0.4, 0.62);
+    this.carColliders.delete(old.collider.handle);
+    this.physics.world.removeRigidBody(old.body);
+    this.r.scene.remove(old.visual.root);
+    const spec = carSpec(g.car);
+    const car = this.makeCar({ number: g.number, color: g.color, seed: g.number + g.slot * 7 }, pl.pos, pl.quat, spec, this.startCompound(g, spec));
+    const skill = 0.9 + ((slot * 37) % 10) / 100;
+    this.bots.set(slot, { car, ai: new BotDriver(car, tr, skill, this.map.oval, slot), input: { steer: 0, throttle: 0, brake: 0, shiftUp: false, shiftDown: false }, penalty: 0, limit: b.limit });
+    this.director?.noteReset(slot, i);
+    this.room.sendEvent('respawn', { s: slot });
   }
 
   // ====================================================================== damage handling
@@ -779,10 +804,16 @@ export class Session {
       }
     }
 
-    // ---------------- spectate after a wreck ----------------
-    if (this.car.damage.destroyed && this.cfg.laps > 0) {
+    // ---------------- after a wreck: spectate, then back in the race 20 s later ----------------
+    if (this.car.damage.destroyed) {
       if (this.destroyedAt < 0) this.destroyedAt = this.time;
-      if (this.spectating < 0 && this.time - this.destroyedAt > 4) this.nextSpectate();
+      if (this.cfg.laps > 0 && this.spectating < 0 && this.time - this.destroyedAt > 4) this.nextSpectate();
+      if (this.time - this.destroyedAt >= RESPAWN && this.race.phase !== 'finished') this.respawnLocal();
+    }
+    if (this.isHost) for (const [slot, b] of this.bots) {
+      if (!b.car.damage.destroyed) continue;
+      b.deadAt ??= this.time;
+      if (this.time - b.deadAt >= RESPAWN && this.race.phase !== 'finished') this.respawnBot(slot);
     }
 
     // ---------------- network out ----------------
@@ -1041,7 +1072,10 @@ export class Session {
     const dmg = this.car.damage;
     let status = '';
     if (this.resetHold > 0.15) status = `KEEP HOLDING R — ${dmg.destroyed && !this.cfg.laps ? 'NEW CAR' : 'RESET'} IN ${Math.max(0, RESET_HOLD - this.resetHold).toFixed(1)}s`;
-    else if (dmg.destroyed) status = this.spectating >= 0 ? `DESTROYED — SPECTATING ${this.entry(this.spectating)?.nickname ?? ''} (C: next)` : this.cfg.laps ? 'DESTROYED — DNF' : 'DESTROYED — HOLD R FOR A NEW CAR';
+    else if (dmg.destroyed) {
+      const left = Math.max(0, Math.ceil(RESPAWN - (this.time - Math.max(0, this.destroyedAt))));
+      status = `DESTROYED — BACK IN ${left} s${this.spectating >= 0 ? ` · WATCHING ${this.entry(this.spectating)?.nickname ?? ''} (C: next)` : this.cfg.laps ? '' : ' (or hold R)'}`;
+    }
     else if (this.race.phase === 'pace') status = 'PACE LAP — HOLD POSITION';
     else if (this.race.phase === 'caution') status = this.race.sc === 'vsc' ? 'VIRTUAL SAFETY CAR — KEEP TO THE LIMIT' : this.race.sc === 'sc' ? 'SAFETY CAR — NO OVERTAKING' : 'CAUTION — SLOW DOWN';
     else if (this.pits && this.pits.phaseOf(this.self) === 'service') status = `PIT STOP — ${Math.max(0, this.pits.timerOf(this.self)).toFixed(1)} s`;

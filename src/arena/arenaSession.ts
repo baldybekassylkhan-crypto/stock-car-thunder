@@ -515,7 +515,6 @@ export class ArenaSession {
     this.r.scene.add(ring);
     this.shockRings.push({ mesh: ring, t: 0 });
     this.effects.flash(p.clone().setY(1.5), 3, 0.25, 0x8fd8ff);
-    this.effects.dust(p, new THREE.Vector3(), 0x9b7650);
     const dist = this.r.camera.position.distanceTo(p);
     if (dist < 120) this.sfx?.shockwave();
     this.rig.addShake(Math.min(0.8, 12 / (dist + 4)));
@@ -616,7 +615,6 @@ export class ArenaSession {
       const strength = Math.min(1, raw / 250);
       if (raw > 60) this.effects.shards(c.world, vMe, Math.round(6 + strength * 20), Math.random() < 0.5 ? 0xcfe3ff : 0x333333);
       if (raw > 30) this.effects.sparks(c.world, vMe, 10 + strength * 30, 1.5);
-      if (raw > 120) this.effects.dust(c.world, vMe, 0x9b7650);
       const camDist = this.r.camera.position.distanceTo(c.world);
       this.engine?.impact(strength / (1 + camDist / 30));
       if (l.slot === this.self) {
@@ -871,7 +869,8 @@ export class ArenaSession {
     };
     const vel = car ? (() => { const lv = car.body.linvel(); return new THREE.Vector3(lv.x, lv.y, lv.z); })() : this.remotes.get(slot)?.vel.clone() ?? new THREE.Vector3();
     const bay = v.engineBay.clone().applyMatrix4(v.root.matrixWorld);
-    if (smoke > 0.1) rate(`s${slot}`, 5 + smoke * 26, () => this.effects.smoke(bay, vel, smoke));
+    // only a thin dark trail from badly damaged engines (big light-grey clouds hid the arena)
+    if (smoke >= 0.6) rate(`s${slot}`, smoke >= 1 ? 1.5 : 1 + smoke * 3, () => this.effects.smoke(bay, vel, smoke * 0.75));
     if (fire > 0.05) rate(`f${slot}`, 10 + fire * 50, () => this.effects.fire(bay.clone().add(_v.set((Math.random() - 0.5), 0, (Math.random() - 0.5) * 2)), vel, 0.5 + fire));
     if (nitro) rate(`n${slot}`, 60, () => {
       const rear = _v.set((Math.random() - 0.5) * 0.6, 0.35, -2.7).applyMatrix4(v.root.matrixWorld).clone();
@@ -885,10 +884,9 @@ export class ArenaSession {
       car.wheels.forEach((w, i) => {
         const key = `${slot}w${i}`;
         if (!w.contact || Math.abs(car.telemetry.speed) < 3) { this.effects.skids.lift(key); return; }
-        if (w.slip > 1.05 || w.locked) {
-          this.effects.skids.add(key, w.point, _v.set(0, 1, 0), Math.min(1, w.slip - 0.8));
-          rate(`t${key}`, 18 * Math.min(2, w.slip - 0.9), () => this.effects.tireSmoke(w.point, vel, Math.min(1.5, w.slip - 0.8), 0xb59a7a));
-        } else this.effects.skids.lift(key);
+        // skid marks in the dirt, but no smoke clouds (they blocked the view in the arena)
+        if (w.slip > 1.05 || w.locked) this.effects.skids.add(key, w.point, _v.set(0, 1, 0), Math.min(1, w.slip - 0.8));
+        else this.effects.skids.lift(key);
       });
     }
   }

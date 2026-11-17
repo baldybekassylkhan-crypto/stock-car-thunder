@@ -84,6 +84,8 @@ export class RaceDirector {
   /** Local yellow flags: incident sample index → time it was last confirmed. */
   private incidents = new Map<number, { i: number; t: number }>();
   private sc: '' | 'sc' | 'vsc' = '';
+  /** Cars currently wrecked (they respawn 20 s later and keep racing). */
+  private wrecked = new Set<number>();
   msg = '';
   readonly practice: boolean;
 
@@ -137,11 +139,14 @@ export class RaceDirector {
       st.lap = Math.max(0, lp.lap - 1);
       st.last = lp.lastLap;
       st.best = lp.bestLap;
+      // a wreck brings out the yellow, but the car respawns and stays in the race
       if (st.status === 0 && e.destroyed()) {
-        st.status = 2;
-        this.incidents.set(e.slot, { i: lp.index, t: this.time });
-        if (!this.practice && this.phase === 'green') this.caution('Wreck', 'sc');
-      }
+        if (!this.wrecked.has(e.slot)) {
+          this.wrecked.add(e.slot);
+          this.incidents.set(e.slot, { i: lp.index, t: this.time });
+          if (!this.practice && this.phase === 'green') this.caution('Wreck', 'sc');
+        }
+      } else this.wrecked.delete(e.slot);
       if (completed && st.status === 0 && !this.practice && (this.flag === 'checkered' || st.lap >= this.laps)) {
         st.status = 1;
         st.total = this.time;
@@ -150,7 +155,7 @@ export class RaceDirector {
       }
       // stopped car on track → caution
       if (this.phase === 'green' && !this.practice && st.status === 0) {
-        if (e.speed() < 4 && !e.inPit?.()) {
+        if (e.speed() < 4 && !e.inPit?.() && !this.wrecked.has(e.slot)) {
           const t = (this.stopped.get(e.slot) ?? 0) + dt;
           this.stopped.set(e.slot, t);
           if (t > 1.5) this.incidents.set(e.slot, { i: lp.index, t: this.time });
@@ -158,8 +163,8 @@ export class RaceDirector {
           if (this.series === 'gp' ? t > 10 : t > 3) { this.caution('Stopped car', 'vsc'); this.stopped.set(e.slot, -15); }
         } else if ((this.stopped.get(e.slot) ?? 0) > 0) this.stopped.set(e.slot, 0);
       }
-      // wrecks stay a local yellow
-      if (st.status === 2 && this.incidents.has(e.slot)) this.incidents.get(e.slot)!.t = this.time;
+      // wrecks stay a local yellow until the car is back
+      if (this.wrecked.has(e.slot) && this.incidents.has(e.slot)) this.incidents.get(e.slot)!.t = this.time;
     }
     if (this.phase === 'pace' && leaderStarted) {
       this.phase = 'green';

@@ -161,9 +161,12 @@ export function installQuickRace(getSession: () => Session | null) {
     const btn = (pred: (t: string) => boolean) => [...document.querySelectorAll('button')].find((b) => pred(b.textContent ?? ''));
     btn((t) => t.startsWith('Single'))?.click();
     await wait(300);
-    document.querySelector<HTMLElement>(`.map-opt[data-id="${map}"]`)?.click();
     const set = (id: string, v: string) => { const el = document.querySelector<HTMLSelectElement>(`#${id}`)!; el.value = v; el.dispatchEvent(new Event('change')); };
+    // series first: the track list depends on it
     set('series', series); set('samecar', car); // car = '' → free choice, else everyone drives it
+    await wait(100);
+    document.querySelector<HTMLElement>(`.map-opt[data-id="${map}"]`)?.click();
+    await wait(100);
     set('dmg', damage); set('laps', String(laps)); set('bots', String(bots));
     btn((t) => t === 'Start race')?.click();
     for (let i = 0; i < 80 && !(getSession() as Any)?.bots?.size; i++) await wait(250);

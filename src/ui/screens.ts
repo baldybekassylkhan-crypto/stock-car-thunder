@@ -1,5 +1,5 @@
 import { profile, settings, saveProfile, saveSettings, validNickname, normalizeCode, LIVERY_COLORS, type Quality } from '../core/profile';
-import { MAPS } from '../tracks/maps';
+import { MAPS, mapsFor } from '../tracks/maps';
 import { MAX_GRID, MAX_HUMANS } from '../net/transport';
 import type { Room } from '../net/room';
 import type { ResultRow } from '../race/race';
@@ -190,7 +190,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
       </div>` : ''}
       <div class="room-grid">
         <div class="stack">
-          <div><label>Track</label><div class="maps" id="maps"></div></div>
+          <div><label>Track <span class="anytrack"><input type="checkbox" id="anytrack" /> any track</span></label><div class="maps" id="maps"></div></div>
           <div class="row">
             <div><label>Laps</label><select id="laps">${[0, 3, 5, 10, 20, 40].map((l) => `<option value="${l}">${l === 0 ? 'Free practice' : l}</option>`).join('')}</select></div>
             <div><label>Damage</label><select id="dmg"><option value="realistic">Realistic</option><option value="brutal">Brutal</option><option value="off">Off (visual only)</option></select></div>
@@ -293,7 +293,12 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
   const render = () => {
     const s = room.settings;
     const map = MAPS.find((m) => m.id === s.map) ?? MAPS[0];
-    $('#maps')!.innerHTML = MAPS.map((m) => `
+    const offered = mapsFor(s.series, !!s.anyTrack);
+    // a series change can leave the room on a track that series doesn't race: pick one that does
+    if (room.isHost && !offered.some((m) => m.id === s.map)) { room.setSettings({ map: offered[0].id }); return; }
+    const anyBox = $<HTMLInputElement>('#anytrack');
+    if (anyBox) { anyBox.checked = !!s.anyTrack; anyBox.disabled = !room.isHost; }
+    $('#maps')!.innerHTML = offered.map((m) => `
       <div class="map-opt ${m.id === s.map ? 'sel' : ''} ${room.isHost ? '' : 'locked-soft'}" data-id="${m.id}">
         <div class="sw" style="background:${m.swatch}"></div>
         <div><b>${m.name}</b><small>${m.subtitle}</small></div>
@@ -337,6 +342,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
   room.onLobby = render;
 
   lapsSel.addEventListener('change', () => room.setSettings({ laps: Number(lapsSel.value) }));
+  root.querySelector<HTMLInputElement>('#anytrack')?.addEventListener('change', (e) => { room.setSettings({ anyTrack: (e.target as HTMLInputElement).checked }); render(); });
   dmgSel.addEventListener('change', () => room.setSettings({ damage: dmgSel.value as Room['settings']['damage'] }));
   botsSel.addEventListener('change', () => { room.setSettings({ bots: Number(botsSel.value) }); render(); });
   weatherSel.addEventListener('change', () => room.setSettings({ weather: weatherSel.value as 'dry' | 'rain' }));
@@ -473,7 +479,7 @@ export function loadingScreen(msg: string) {
   mount(`<div class="card"><div class="loading">${esc(msg)}</div><p class="note">Generating track, textures and scenery…</p></div>`);
 }
 
-export function pauseScreen(api: { resume(): void; reset(): void; exit(): void; settings(): void }, online: boolean) {
+export function pauseScreen(api: { resume(): void; reset(): void; exit(): void; settings(): void; endToLobby?: () => void }, online: boolean) {
   const root = mount(`
     <div class="card pause">
       <h2>Paused</h2>
@@ -492,10 +498,12 @@ export function pauseScreen(api: { resume(): void; reset(): void; exit(): void; 
       <button class="btn block" id="resume">Resume</button>
       <button class="btn ghost block" id="reset">Reset car</button>
       <button class="btn ghost block" id="settings">Settings</button>
+      ${api.endToLobby ? `<button class="btn ghost block" id="endlobby">${online ? 'End game — everyone back to the lobby' : 'Back to the lobby'}</button>` : ''}
       <button class="btn red block" id="exit">${online ? 'Leave race' : 'Quit to menu'}</button>
     </div>`);
   root.querySelector('#resume')!.addEventListener('click', api.resume);
   root.querySelector('#reset')!.addEventListener('click', api.reset);
   root.querySelector('#settings')!.addEventListener('click', api.settings);
   root.querySelector('#exit')!.addEventListener('click', api.exit);
+  root.querySelector('#endlobby')?.addEventListener('click', () => api.endToLobby?.());
 }
