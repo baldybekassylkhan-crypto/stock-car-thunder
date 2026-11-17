@@ -49,6 +49,8 @@ export interface Entrant {
   pos: () => THREE.Vector3;
   speed: () => number;
   destroyed: () => boolean;
+  /** In the pit lane (stopping there is not an incident). */
+  inPit?: () => boolean;
 }
 
 export interface ResultRow {
@@ -148,7 +150,7 @@ export class RaceDirector {
       }
       // stopped car on track → caution
       if (this.phase === 'green' && !this.practice && st.status === 0) {
-        if (e.speed() < 4) {
+        if (e.speed() < 4 && !e.inPit?.()) {
           const t = (this.stopped.get(e.slot) ?? 0) + dt;
           this.stopped.set(e.slot, t);
           if (t > 1.5) this.incidents.set(e.slot, { i: lp.index, t: this.time });

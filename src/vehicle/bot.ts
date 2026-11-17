@@ -3,6 +3,7 @@ import type { DriverInput } from '../core/input';
 import type { Track } from '../tracks/track';
 import type { Car } from './car';
 import { COMPOUNDS } from './tyres';
+import { within, pitApproach, type PitInfo } from '../race/pits';
 
 export interface Traffic {
   pos: THREE.Vector3;
@@ -42,6 +43,11 @@ export class BotDriver {
   wantsReset = false;
   /** Set by the session: shown the blue flag (about to be lapped) → let the faster car by. */
   blue = false;
+  /**
+   * Pit stop in progress (set by the session): drive down the pit lane to `box`, stop there until
+   * `served`, then rejoin. Cleared by the session once the car is back on track.
+   */
+  pit: { info: PitInfo; box: number; limit: number; served: boolean } | null = null;
   /** Slowly filtered wake: plan for dirty air without jumpy target speeds. */
   private wakeF = 0;
 
@@ -85,6 +91,55 @@ export class BotDriver {
   /** Braking deceleration available at speed v (downforce helps). */
   decelAt(v: number) {
     return (this.oval ? 8.5 : 7) * this.gripK * Math.min(1, this.car.brakeEff / 0.9) * (1 + Math.max(0, this.aeroC) * v * v / G * 0.5);
+  }
+
+  /** metres from sample a forward to sample b */
+  private ahead(a: number, b: number) { return this.track.wrap(b - a) * this.track.ds; }
+
+  /** Lateral target while pitting, or null when the pit lane doesn't matter here yet. */
+  private pitLateral(i: number, racing: number): number | null {
+    const p = this.pit!, info = p.info, tr = this.track;
+    const toEntry = this.ahead(i, info.entry);
+    if (!within(tr, i, info.entry, info.exit)) {
+      // last 200 m before the entry: move to the inside of the track
+      // drift down to the bottom of the track gradually over the last 700 m (never dive at speed)
+      const approach = pitApproach(tr.length);
+      return toEntry < approach ? THREE.MathUtils.lerp(racing, 0.8, THREE.MathUtils.smoothstep(1 - (toEntry - 60) / (approach - 60), 0, 1)) : null;
+    }
+    const taperIn = this.ahead(info.entry, info.limitFrom);
+    const intoLane = this.ahead(info.entry, i);
+    // cross into the lane early in the taper, before the pit wall starts
+    if (intoLane < taperIn) return THREE.MathUtils.lerp(0.8, info.lane, THREE.MathUtils.smoothstep(intoLane / (taperIn * 0.8), 0, 1));
+    const toExit = this.ahead(i, info.exit);
+    const taperOut = this.ahead(info.limitTo, info.exit);
+    if (toExit < taperOut) return THREE.MathUtils.lerp(2.5, info.lane, THREE.MathUtils.smoothstep(toExit / taperOut, 0, 1));
+    if (!p.served) {
+      const toBox = this.ahead(i, p.box);
+      // turn into the stall well before it, while still rolling
+      if (toBox < 70 && toBox < this.track.length / 2) return THREE.MathUtils.lerp(info.box, info.lane, THREE.MathUtils.smoothstep((toBox - 12) / 58, 0, 1));
+      if (this.ahead(p.box, i) < 15) return info.box;
+    } else if (this.ahead(p.box, i) < 30) return THREE.MathUtils.lerp(info.box, info.lane, this.ahead(p.box, i) / 30);
+    return info.lane;
+  }
+
+  /** Speed cap while pitting: the pit lane limit, and a gentle stop at the stall. */
+  private pitSpeed(i: number): number {
+    const p = this.pit!, info = p.info, tr = this.track;
+    let v = Infinity;
+    if (within(tr, i, info.limitFrom, info.limitTo)) v = p.limit - 0.6;
+    else if (!within(tr, i, info.entry, info.exit) || within(tr, i, info.entry, info.limitFrom)) {
+      const d = this.ahead(i, info.limitFrom);
+      if (d < 500) v = Math.sqrt((p.limit - 0.6) ** 2 + 2 * 6 * d);
+      // arrive at the pit entry slowly enough to swing across in the taper (≤ ~90 mph)
+      const toEntry = this.ahead(i, info.entry);
+      const entrySpeed = THREE.MathUtils.clamp(this.ahead(info.entry, info.limitFrom) * 0.27, p.limit, 36);
+      if (toEntry < 800 && !within(tr, i, info.entry, info.exit)) v = Math.min(v, Math.sqrt(entrySpeed * entrySpeed + 2 * 5 * toEntry));
+    }
+    if (!p.served) {
+      const toBox = this.ahead(i, p.box);
+      if (toBox < 120) v = Math.min(v, Math.sqrt(2 * 4 * Math.max(0, toBox - 0.5)));
+    }
+    return v;
   }
 
   drive(dt: number, traffic: Traffic[], raceSpeedLimit: number): DriverInput {
@@ -147,6 +202,8 @@ export class BotDriver {
     if (this.oval) target = this.laneTarget;
     else if (this.passTimer > 0) target = THREE.MathUtils.lerp(target, this.laneTarget, 0.7);
     target = this.oval ? THREE.MathUtils.clamp(target, OVAL_IN, tr.width - OVAL_OUT) : THREE.MathUtils.clamp(target, 2, tr.width - 2);
+    const pitLat = this.pit ? this.pitLateral(i, target) : null;
+    if (pitLat !== null) target = pitLat;
 
     // ---------------- steering ----------------
     const T = tr.T[tr.wrap(i + 3)];
@@ -157,15 +214,28 @@ export class BotDriver {
     let k = 0;
     for (let j = 0; j < 10; j++) k += tr.curvature[tr.wrap(i + j * 2)];
     k /= 10;
-    let ang = -2.8 * k - cr * 0.65 - (d - target) * (this.oval ? 0.006 : 0.012) - latV * 0.014;
+    // firm steering only inside the pit lane (low speed); normal gains on the approach
+    const pitZone = !!this.pit && within(tr, i, this.pit.info.entry, this.pit.info.exit);
+    let ang = -2.8 * k - cr * 0.65 - (d - target) * (pitZone ? 0.02 : this.oval ? 0.006 : 0.012) - latV * 0.014;
     // wall avoidance: steer away harder the closer the car drifts to either edge
     const wallGap = tr.width - d;
     if (wallGap < 2.8) ang -= (2.8 - wallGap) * 0.025;
-    if (d < 1.2) ang += (1.2 - d) * 0.025;
+    if (d < 1.2 && pitLat === null) ang += (1.2 - d) * 0.025;
     // yaw damping: countersteer when the car rotates faster (or slower) than the corner needs
     const yawErr = car.body.angvel().y - sp * tr.curvature[i];
     ang += THREE.MathUtils.clamp(yawErr, -1.5, 1.5) * 0.12;
     const lock = THREE.MathUtils.lerp(car.spec.steerLock[0], car.spec.steerLock[1], THREE.MathUtils.smoothstep(Math.abs(sp), 3, 62));
+    if (pitZone) {
+      // pure pursuit on the pit path: aim at a point a few metres ahead (lane changes, the stall)
+      const L = Math.max(10, Math.abs(sp) * 1.25);
+      const ia = tr.wrap(i + Math.round(L / tr.ds));
+      const P = tr.surface(ia, this.pitLateral(ia, target) ?? target);
+      const vx = P.x - p.x, vz = P.z - p.z;
+      const vl = Math.hypot(vx, vz) || 1;
+      const crossV = (fw.z * vx - fw.x * vz) / vl;
+      const wb = car.spec.geo.wheelbaseF - car.spec.geo.wheelbaseR;
+      ang = -Math.atan((2 * wb * crossV) / L);
+    }
     const steer = THREE.MathUtils.clamp(ang / lock, -1, 1);
 
     // ---------------- speed ----------------
@@ -205,6 +275,7 @@ export class BotDriver {
       vT = Math.min(vT, Math.sqrt(Math.max(0, vb * vb + 2 * 6 * this.gripK * this.car.gripScale * (gap - 8))));
     }
     vT = Math.min(vT, raceSpeedLimit);
+    if (this.pit) vT = Math.min(vT, this.pitSpeed(i));
     const err = vT - sp;
     let throttle = THREE.MathUtils.clamp(err * 0.5, 0, 1);
     let brake = THREE.MathUtils.clamp(-err * 0.22, 0, 1);

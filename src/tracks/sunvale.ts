@@ -47,7 +47,7 @@ export async function loadSunvale(): Promise<LoadedMap> {
     const t = THREE.MathUtils.clamp(Math.abs(k) * 300, 0, 1);
     return deg(3) + deg(28) * t * t * (3 - 2 * t);
   });
-  const built = buildOval(track, { apron: APRON, wallHeight: 1.25, fenceHeight: 6.5, pit: { from: -300, to: 300, width: 15 } });
+  const built = buildOval(track, { apron: APRON, wallHeight: 1.25, fenceHeight: 6.5, pit: { from: -150, to: 150, width: 15, boxSpacing: 5 } });
   const group = built.group;
   const r = rng(42);
 
@@ -327,6 +327,7 @@ export async function loadSunvale(): Promise<LoadedMap> {
     track,
     group,
     colliders: built.colliders,
+    pit: built.pit,
     tvCams,
     gridSlot: makeGrid(track, { backM: 12, rowM: 9, lanes: [5.5, 10.5] }),
     paceSpeed: 36,

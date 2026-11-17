@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RAPIER, PhysicsWorld, SURFACE_GRIP, SURFACE_DRAG, GROUP_CAR } from '../physics/world';
 import { CarDamage, type DamageLevel } from '../damage/damage';
-import { wobble } from '../damage/visual';
+import { wobble, hidePart } from '../damage/visual';
 import type { DriverInput } from '../core/input';
 import type { CarVisual } from './carModel';
 import { buildCarModel } from './models';
@@ -88,7 +88,7 @@ export interface CarContact {
 export class Car {
   readonly body: RAPIER.RigidBody;
   readonly collider: RAPIER.Collider;
-  readonly damage: CarDamage;
+  damage: CarDamage;
   /** Throttle is cut above this forward speed (pace laps, cautions). */
   speedLimit = Infinity;
   /** Weather grip multiplier. */
@@ -99,7 +99,7 @@ export class Car {
   flapsOpen = false;
   private flapAngle = 0;
   private visT = 0;
-  readonly visual: CarVisual;
+  visual: CarVisual;
   readonly wheels: WheelState[];
   readonly telemetry: CarTelemetry;
   manual = false;
@@ -139,7 +139,7 @@ export class Car {
   private staticComp: number;
   private hardpointY: number;
 
-  constructor(private physics: PhysicsWorld, opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, damageLevel: DamageLevel = 'realistic', spec: CarSpec = carSpec(undefined), compound?: Compound) {
+  constructor(private physics: PhysicsWorld, private opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, damageLevel: DamageLevel = 'realistic', spec: CarSpec = carSpec(undefined), compound?: Compound) {
     this.spec = spec;
     this.tyres = new TyreSet(compound ?? (spec.series === 'gp' ? 'medium' : 'stock'), spec.tyreStartTemp, spec.tyreWear);
     this.brakeTemp = spec.carbonBrakes ? 380 : 200;
@@ -190,6 +190,31 @@ export class Car {
     this.wheels.forEach((w) => { w.omega = 0; w.comp = w.prevComp = this.staticComp; });
     this.snapshot();
     this.snapshot();
+  }
+
+  /**
+   * Pit-stop repair. `full` fixes everything (new bodywork, engine, suspension, wheels); otherwise
+   * only the nose and front wing are replaced. Returns the old visual so the session can swap the
+   * new one into the scene.
+   */
+  repair(full: boolean): CarVisual {
+    const old = this.visual;
+    const d = this.damage;
+    if (full) {
+      this.damage = new CarDamage(d.level, this.spec.mass, this.spec.damage);
+      this.wheelGone.fill(false);
+    } else {
+      delete d.parts.splitter;
+      delete d.parts.bumperF;
+      d.panels.bumperF = 0;
+    }
+    this.visual = buildCarModel(this.opts, this.spec);
+    buildLod(this.visual);
+    // anything still broken stays missing on the new body
+    for (const [name, st] of Object.entries(this.damage.parts)) if (st === 'gone') hidePart(this.visual, this.visual.parts[name as keyof CarVisual['parts']], name);
+    this.visual.root.position.copy(old.root.position);
+    this.visual.root.quaternion.copy(old.root.quaternion);
+    return old;
   }
 
   /** Current mass with fuel (kg). */

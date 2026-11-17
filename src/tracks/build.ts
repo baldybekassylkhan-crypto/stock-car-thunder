@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Track } from './track';
 import * as tex from '../render/textures';
+import type { PitInfo } from '../race/pits';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -15,6 +16,8 @@ export interface ColliderMesh {
 export interface BuiltTrack {
   group: THREE.Group;
   colliders: ColliderMesh[];
+  /** Pit lane, when the track has one. */
+  pit?: PitInfo;
 }
 
 /** Cross-section ribbon: for every sample i, `cross(i)` returns points across; closes the loop. */
@@ -81,7 +84,7 @@ export interface OvalOptions {
   apron: number;
   wallHeight: number;
   fenceHeight: number;
-  pit?: { from: number; to: number; width: number; taper?: number }; // sample range along frontstretch
+  pit?: { from: number; to: number; width: number; taper?: number; boxSpacing?: number }; // sample range along frontstretch
   surface?: 'asphalt' | 'concrete';
   /** Multiplies road roughness (lower = wet-looking sheen). */
   roughness?: number;
@@ -205,6 +208,7 @@ export function buildOval(track: Track, o: OvalOptions): BuiltTrack {
   postGeo.translate(0, postLen / 2, 0);
   const posts = new THREE.InstancedMesh(postGeo, new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.8, roughness: 0.35 }), postCount);
   const tmp = new THREE.Object3D();
+  let pitInfo: PitInfo | undefined;
   for (let k = 0; k < postCount; k++) {
     const i = k * postEvery;
     const base = fenceBase(i).addScaledVector(wallUp(i), -0.2);
@@ -256,20 +260,92 @@ export function buildOval(track: Track, o: OvalOptions): BuiltTrack {
     colliders.push(toCollider('wall', pwGeo));
 
     // pit boxes: painted stalls
+    const spacing = o.pit.boxSpacing ?? 7;
     const boxGeo = new THREE.PlaneGeometry(0.15, width * 0.55);
     boxGeo.rotateX(-Math.PI / 2);
-    const boxes = new THREE.InstancedMesh(boxGeo, lineMat(0xffffff), Math.floor((wTo - wFrom) / 7));
+    const boxes = new THREE.InstancedMesh(boxGeo, lineMat(0xffffff), Math.floor((wTo - wFrom) / spacing) + 1);
     for (let k = 0; k < boxes.count; k++) {
-      const i = track.wrap(wFrom + k * 7);
+      const i = track.wrap(wFrom + k * spacing);
       tmp.position.copy(track.surface(i, inner0 - width * 0.55)).setY(0.03);
       tmp.rotation.set(0, Math.atan2(track.T[i].x, track.T[i].z), 0);
       tmp.updateMatrix();
       boxes.setMatrixAt(k, tmp.matrix);
     }
     group.add(boxes);
+    pitInfo = {
+      entry: track.wrap(from), exit: track.wrap(to),
+      limitFrom: track.wrap(from + taper), limitTo: track.wrap(to - taper),
+      lane: inner0 - 0.6 - width * 0.17,
+      box: inner0 - width * 0.55,
+      inside: -o.apron - 0.8,
+      boxFrom: track.wrap(wFrom + Math.round(spacing / 2)), boxSpacing: spacing,
+    };
   }
 
-  return { group, colliders };
+  return { group, colliders, pit: pitInfo };
+}
+
+/**
+ * Pit lane for a road course: a paved lane beside the track on the left (negative lateral), a pit
+ * wall between it and the track, painted stalls, and paved entry/exit tapers. The track's
+ * run-off there must reach beyond `wallD + 0.6 + laneWidth`.
+ */
+export function buildPitLane(track: Track, o: { from: number; to: number; taper: number; wallD: number; laneWidth: number; boxSpacing: number }): { group: THREE.Group; colliders: ColliderMesh[]; pit: PitInfo } {
+  const group = new THREE.Group();
+  const colliders: ColliderMesh[] = [];
+  const tmp = new THREE.Object3D();
+  const lineMat = (c: number) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const { from, to, taper, wallD, laneWidth } = o;
+  const len = to - from;
+  const outer = -(wallD + 0.6 + laneWidth);
+  const lift = (i: number, d: number, h = 0.012) => track.surface(i, d).addScaledVector(track.N[i], h);
+  const laneGeo = ribbon(track, [from, to], (i, k) => {
+    const t = THREE.MathUtils.smoothstep(Math.min(k / taper, (len - k) / taper), 0, 1);
+    const inner = THREE.MathUtils.lerp(-0.3, -(wallD + 0.6), t);
+    return [lift(i, outer), lift(i, (outer + inner) / 2), lift(i, inner)];
+  }, { uAcross: [0, laneWidth / 6, (wallD + laneWidth) / 6], vScale: 6 });
+  const lane = new THREE.Mesh(laneGeo, pbrMat(tex.concrete(), [1, 1], { color: 0xc8c8c8 }));
+  lane.receiveShadow = true;
+  group.add(lane);
+  colliders.push(toCollider('concrete', laneGeo));
+  // pit wall (generous gaps at both ends for the entry and exit)
+  const wFrom = from + taper + 20, wTo = to - taper - 12;
+  const wallTex = tex.concrete();
+  const pwGeo = ribbon(track, [wFrom, wTo], (i) => {
+    const a = track.surface(i, -wallD), b = track.surface(i, -wallD - 0.6);
+    return [a, a.clone().addScaledVector(UP, 1.05), b.clone().addScaledVector(UP, 1.05), b];
+  }, { uAcross: [0, 0.4, 0.5, 1], vScale: 16 });
+  const pw = new THREE.Mesh(pwGeo, new THREE.MeshStandardMaterial({ map: wallTex.map, color: 0xe8e8e8, roughness: 0.75, side: THREE.DoubleSide }));
+  pw.castShadow = pw.receiveShadow = true;
+  group.add(pw);
+  colliders.push(toCollider('wall', pwGeo));
+  // stall lines and the pit-lane speed limit line
+  const box = outer + laneWidth * 0.28;
+  const boxGeo = new THREE.PlaneGeometry(0.15, laneWidth * 0.5);
+  boxGeo.rotateX(-Math.PI / 2);
+  const count = Math.floor((wTo - wFrom) / o.boxSpacing) + 1;
+  const boxes = new THREE.InstancedMesh(boxGeo, lineMat(0xffffff), count);
+  for (let k = 0; k < count; k++) {
+    const i = track.wrap(wFrom + k * o.boxSpacing);
+    tmp.position.copy(lift(i, box, 0.025));
+    tmp.rotation.set(0, Math.atan2(track.T[i].x, track.T[i].z), 0);
+    tmp.updateMatrix();
+    boxes.setMatrixAt(k, tmp.matrix);
+  }
+  group.add(boxes);
+  for (const at of [from + taper, to - taper]) {
+    const g = ribbon(track, [at, at + 1], (i) => [lift(i, outer, 0.03), lift(i, -wallD - 0.6, 0.03)], { uAcross: [0, 1], vScale: 1 });
+    group.add(new THREE.Mesh(g, lineMat(0xffffff)));
+  }
+  const pit: PitInfo = {
+    entry: track.wrap(from), exit: track.wrap(to),
+    limitFrom: track.wrap(from + taper), limitTo: track.wrap(to - taper),
+    lane: -(wallD + 0.6 + laneWidth * 0.3),
+    box,
+    inside: -(wallD - 2),
+    boxFrom: track.wrap(wFrom + Math.round(o.boxSpacing / 2)), boxSpacing: o.boxSpacing,
+  };
+  return { group, colliders, pit };
 }
 
 /** Infield shape polygon (x, z) from a lateral offset inside the inner edge. */

@@ -38,6 +38,8 @@ export interface HudState {
   penalty: number;
   /** Time penalties (s) added to the player's race time. */
   timePenalty: number;
+  /** Pit plan menu lines (B to open), or null. */
+  pitMenu: string[] | null;
   blue: boolean;
   localYellow: boolean;
   tyres: { temp: number[]; wear: number[]; compound: Compound; window: [number, number] };
@@ -114,7 +116,8 @@ export class Hud {
         <div class="rpm" data-k="rpmwrap"><div data-k="rpm"></div></div>
         <div class="hint" data-k="hint"></div>
       </div>
-      <div class="hud-bl hint">W/S throttle · brake &nbsp; A/D steer &nbsp; C camera &nbsp; drag mouse to look &nbsp; hold R reset &nbsp; Esc pause &nbsp; F3 debug</div>
+      <div class="pitmenu" data-k="pitmenu" style="display:none"></div>
+      <div class="hud-bl hint">W/S throttle · brake &nbsp; A/D steer &nbsp; B pit plan &nbsp; C camera &nbsp; drag mouse to look &nbsp; hold R reset &nbsp; Esc pause &nbsp; F3 debug</div>
       <div class="debug" data-k="debug" style="display:none"></div>`;
     root.querySelectorAll<HTMLElement>('[data-k]').forEach((e) => (this.els[e.dataset.k!] = e));
     root.querySelectorAll<SVGRectElement>('rect[data-p]').forEach((r) => (this.panelEls[r.dataset.p as PanelName] = r));
@@ -170,6 +173,12 @@ export class Hud {
     if (s.countdown > 0 && s.countdown < 1) e.cd.textContent = 'GO!';
     e.spot.textContent = s.spotter;
     e.status.textContent = s.penalty > 0 ? `PENALTY ${s.penalty.toFixed(1)}s` : s.status || (s.timePenalty > 0 ? `+${s.timePenalty}s TIME PENALTY` : '');
+
+    e.pitmenu.style.display = s.pitMenu ? '' : 'none';
+    if (s.pitMenu) {
+      const html = s.pitMenu.map((l, k) => `<div${k === 0 ? ' class="pm-head"' : ''}>${escapeHtml(l)}</div>`).join('');
+      if (e.pitmenu.innerHTML !== html) e.pitmenu.innerHTML = html;
+    }
 
     // tyres: colour = temperature against the compound's window, number = wear
     const ty = s.tyres;

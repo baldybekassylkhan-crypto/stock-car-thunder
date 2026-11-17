@@ -19,7 +19,8 @@ export async function loadIronHollow(_o: MapLoadOptions): Promise<LoadedMap> {
   }, 20);
   const built = buildOval(track, {
     apron: APRON, wallHeight: 1.2, fenceHeight: 5.5,
-    pit: { from: -60, to: 60, width: 11, taper: 16 },
+    // long enough for 32 stalls (10 m apart): the pit road runs round into the turns
+    pit: { from: -110, to: 110, width: 11, taper: 16, boxSpacing: 5 },
     surface: 'concrete',
     roughness: 0.5,
   });
@@ -188,6 +189,7 @@ export async function loadIronHollow(_o: MapLoadOptions): Promise<LoadedMap> {
     track,
     group,
     colliders: built.colliders,
+    pit: built.pit,
     tvCams,
     gridSlot: makeGrid(track, { backM: 9, rowM: 8, lanes: [4, 9] }),
     paceSpeed: 24,

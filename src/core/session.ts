@@ -6,6 +6,7 @@ import { Car, type CarContact } from '../vehicle/car';
 import { carSpec, PART_LABEL, type CarSpec } from '../vehicle/catalog';
 import { COMPOUNDS } from '../vehicle/tyres';
 import { RaceAids, type AidCar } from '../race/aids';
+import { PitManager } from '../race/pitManager';
 import type { Compound } from '../vehicle/tyres';
 import { RacingLine } from '../render/racingLine';
 import { RemoteCar } from '../vehicle/remoteCar';
@@ -104,6 +105,7 @@ export class Session {
   /** Last time each car was blamed for a collision (penalty cooldown). */
   private blameT = new Map<number, number>();
   private racingLine: RacingLine | null = null;
+  private pits: PitManager | null = null;
   private readonly isHost: boolean;
   private readonly self: number;
 
@@ -170,11 +172,13 @@ export class Session {
         pos: () => this.posOf(g.slot),
         speed: () => this.speedOf(g.slot),
         destroyed: () => this.destroyedOf(g.slot),
+        inPit: () => !!this.pits?.inLane(g.slot),
       }));
       this.director = new RaceDirector(tr, this.cfg.laps, entrants, (slot) => gridPos(slot).i, this.map.paceSpeed, this.cfg.series);
     }
 
     this.aids = new RaceAids(tr, !this.map.oval, this.grid.some((g) => !!carSpec(g.car).drs));
+    if (this.map.pit) this.setupPits(this.map.pit);
     if (settings.racingLine) { this.racingLine = new RacingLine(this.car, tr, this.map.oval); this.r.scene.add(this.racingLine.mesh); }
     this.rig = new CameraRig(this.r.camera, this.map.tvCams);
     const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 });
@@ -285,6 +289,11 @@ export class Session {
         break;
       case 'race':
         if (!this.isHost) this.applyRace(p as RaceSnapshot);
+        break;
+      case 'pitreq':
+      case 'pitgo':
+      case 'pitdone':
+        this.pits?.handleEvent(type, p, from);
         break;
       case 'pen':
         // a client reports a penalty for its own car (track limits, causing a collision)
@@ -666,6 +675,10 @@ export class Session {
         }
       } else this.resetHold = 0;
       if (wasPressed('F3') || wasPressed('Backquote')) this.debug = !this.debug;
+      if (this.pits) {
+        if (wasPressed('KeyB')) this.pits.menuKey('toggle', this.car);
+        for (const k of [1, 2, 3, 4] as const) if (wasPressed(`Digit${k}`)) this.pits.menuKey(k, this.car);
+      }
       if (wasPressed('KeyM')) { settings.manualGears = !settings.manualGears; this.applyAssists(); this.flash(settings.manualGears ? 'MANUAL GEARS (Q/E)' : 'AUTOMATIC GEARS', 1.5); }
     }
     }
@@ -679,6 +692,8 @@ export class Session {
       if (this.raceSendT <= 0 || snap.msg) { this.room.sendEvent('race', snap); this.raceSendT = 0.2; }
       if (snap.phase === 'finished' && !this.resultsSent) {
         this.resultsSent = true;
+        const finished = this.director.results().filter((r) => r.status === 1).map((r) => r.slot);
+        for (const slot of this.pits?.ruleBreakers(finished) ?? []) this.director.addPenalty(slot, 30, 'only one dry tyre compound', this.entry(slot)?.nickname ?? '?');
         const rows = this.director.results();
         this.room.sendEvent('results', { rows });
         setTimeout(() => { if (!this.disposed) this.cb.onResults(rows, this.grid); }, 2500);
@@ -691,9 +706,10 @@ export class Session {
     const auto = import.meta.env.DEV ? (window as unknown as { __auto?: (s: Session) => DriverInput }).__auto : undefined;
     const input = this.paused ? { steer: 0, throttle: 0, brake: 0.3, shiftUp: false, shiftDown: false } : auto ? auto(this) : interactive ? readDriverInput(dt, Math.abs(this.car.telemetry.speed)) : { steer: 0, throttle: 0, brake: 0, shiftUp: false, shiftDown: false };
     if (this.penalty > 0) this.penalty -= dt;
-    this.car.inputLocked = limit === 0 || this.penalty > 0;
+    this.pits?.update(dt, [this.self, ...this.bots.keys()]);
+    this.car.inputLocked = limit === 0 || this.penalty > 0 || !!this.pits?.held(this.self);
     this.carLimit = easeLimit(this.carLimit, limit, this.car.telemetry.speed, dt);
-    this.car.speedLimit = this.carLimit;
+    this.car.speedLimit = Math.min(this.carLimit, this.pits?.speedCap(this.self) ?? Infinity);
     this.driveBots(dt, limit);
     this.computeDraft();
     this.updateAids(dt);
@@ -728,6 +744,7 @@ export class Session {
     this.car.sync(alpha, dt);
     for (const b of this.bots.values()) b.car.sync(alpha, dt);
     for (const rc of this.remotes.values()) rc.sync(dt);
+    this.pits?.updateVisuals(dt);
     if (this.progress.update(this.car.position, this.time) && this.cfg.laps === 0) this.flash(`LAP ${this.progress.lap - 1}  ${this.progress.lastLap.toFixed(3)}s`, 2.5);
 
     const effectFor = (slot: number, car: Car) => {
@@ -806,12 +823,47 @@ export class Session {
     if (interactive) this.updateHud(tm);
   }
 
+  private setupPits(info: NonNullable<LoadedMap['pit']>) {
+    const self = this;
+    const pits = new PitManager(this.map.track, info, {
+      isHost: this.isHost,
+      self: this.self,
+      series: this.cfg.series,
+      rain: this.map.rain,
+      laps: this.cfg.laps,
+      scene: this.r.scene,
+      order: this.grid.map((g) => g.slot),
+      carOf: (slot) => this.carOf(slot),
+      botOf: (slot) => this.bots.get(slot)?.ai ?? null,
+      visualOf: (slot) => this.visualOf(slot),
+      posOf: (slot) => this.posOf(slot),
+      colorOf: (slot) => this.entry(slot)?.color ?? '#888',
+      nameOf: (slot) => this.entry(slot)?.nickname ?? '?',
+      lapsDone: (slot) => this.race.st.find((x) => x.slot === slot)?.lap ?? 0,
+      caution: () => self.race.phase === 'caution',
+      send: (type, payload) => this.room.sendEvent(type, payload),
+      flash: (text, sec, color) => this.flash(text, sec, color ?? ''),
+      penalty: (slot, sec, why) => this.givePenalty(slot, sec, why),
+      swapVisual: (_slot, old, now) => { this.r.scene.remove(old.root); this.r.scene.add(now.root); },
+      rebuildRemote: (slot) => {
+        const rc = this.remotes.get(slot);
+        if (!rc) return;
+        const old = rc.rebuild();
+        this.r.scene.remove(old.root);
+        this.r.scene.add(rc.visual.root);
+      },
+    });
+    pits.specOfRemote = (slot) => { const g = this.entry(slot); return g ? carSpec(g.car) : null; };
+    for (const g of this.grid) pits.noteStartTyre(g.slot, this.startCompound(g, carSpec(g.car)));
+    this.pits = pits;
+  }
+
   /** Drag-flap zones, track limits, blue and local yellow flags for the cars this peer runs. */
   private updateAids(dt: number) {
     if (!this.aids) return;
     const cars: AidCar[] = this.grid
       .filter((g) => !this.destroyedOf(g.slot) && (this.carOf(g.slot) || this.remotes.has(g.slot)))
-      .map((g) => ({ slot: g.slot, pos: this.posOf(g.slot).clone(), speed: Math.abs(this.speedOf(g.slot)), car: this.carOf(g.slot) }));
+      .map((g) => ({ slot: g.slot, pos: this.posOf(g.slot).clone(), speed: Math.abs(this.speedOf(g.slot)), car: this.carOf(g.slot), inPit: !!this.pits?.inLane(g.slot) }));
     this.aids.update(dt, cars, this.race,
       (slot, n) => { if (slot === this.self) this.flash(`TRACK LIMITS — WARNING ${n}/3`, 2.2, '#f5f5f5'); },
       (slot, sec, why) => this.givePenalty(slot, sec, why));
@@ -871,16 +923,17 @@ export class Session {
     for (const [slot, b] of this.bots) {
       const far = humans.every((h) => h.distanceToSquared(b.car.position) > FAR_BOT_M * FAR_BOT_M);
       b.limit = easeLimit(b.limit, limit, b.car.telemetry.speed, dt);
-      if (far && limit > 0 && (this.botFrame + slot) % 2 === 1 && !b.ai.wantsReset) {
+      if (far && limit > 0 && (this.botFrame + slot) % 2 === 1 && !b.ai.wantsReset && !b.ai.pit) {
         if (b.penalty > 0) b.penalty -= dt;
         continue;
       }
       const others = traffic.filter((t) => t.pos.distanceToSquared(b.car.position) > 0.5);
       // a car serving a reset penalty is held: drive it as if on the grid (also pauses stuck detection)
-      b.input = b.ai.drive(far ? dt * 2 : dt, others, b.penalty > 0 ? 0 : b.limit);
+      const held = !!this.pits?.held(slot);
+      b.input = b.ai.drive(far ? dt * 2 : dt, others, b.penalty > 0 || held ? 0 : b.limit);
       if (b.penalty > 0) b.penalty -= dt;
-      b.car.inputLocked = limit === 0 || b.penalty > 0;
-      b.car.speedLimit = b.limit;
+      b.car.inputLocked = limit === 0 || b.penalty > 0 || held;
+      b.car.speedLimit = Math.min(b.limit, this.pits?.speedCap(slot) ?? Infinity);
       if (b.ai.wantsReset) {
         b.ai.wantsReset = false;
         if (!b.car.damage.destroyed) { this.resetCar(b.car, null, slot); b.penalty = 3; }
@@ -991,6 +1044,9 @@ export class Session {
     else if (dmg.destroyed) status = this.spectating >= 0 ? `DESTROYED — SPECTATING ${this.entry(this.spectating)?.nickname ?? ''} (C: next)` : this.cfg.laps ? 'DESTROYED — DNF' : 'DESTROYED — HOLD R FOR A NEW CAR';
     else if (this.race.phase === 'pace') status = 'PACE LAP — HOLD POSITION';
     else if (this.race.phase === 'caution') status = this.race.sc === 'vsc' ? 'VIRTUAL SAFETY CAR — KEEP TO THE LIMIT' : this.race.sc === 'sc' ? 'SAFETY CAR — NO OVERTAKING' : 'CAUTION — SLOW DOWN';
+    else if (this.pits && this.pits.phaseOf(this.self) === 'service') status = `PIT STOP — ${Math.max(0, this.pits.timerOf(this.self)).toFixed(1)} s`;
+    else if (this.pits && (this.pits.phaseOf(this.self) === 'stopping' || this.pits.phaseOf(this.self) === 'waiting')) status = 'PIT STOP — CREW READY';
+    else if (this.pits && this.pits.speedCap(this.self) < Infinity) status = `PIT LIMITER ${Math.round(this.pits.limit * (settings.units === 'mph' ? 2.237 : 3.6))} ${settings.units === 'mph' ? 'MPH' : 'KM/H'}`;
     else if (this.localYellow) status = 'YELLOW FLAG — SLOW, NO OVERTAKING';
     else if (this.car.fuel <= 0) status = 'OUT OF FUEL';
     else if (this.race.phase === 'loading') status = 'WAITING FOR DRIVERS…';
@@ -1017,6 +1073,7 @@ export class Session {
       spotter: this.spotter,
       penalty: Math.max(0, this.penalty),
       timePenalty: mine?.pen ?? 0,
+      pitMenu: this.pits?.menuLines(this.car) ?? null,
       blue: this.blueFlag,
       localYellow: this.localYellow && this.race.flag === 'green',
       tyres: { temp: this.car.tyres.temp, wear: this.car.tyres.wear, compound: this.car.tyres.compound, window: COMPOUNDS[this.car.tyres.compound].window },
@@ -1044,6 +1101,7 @@ export class Session {
     this.hud.show(false);
     if (this.map) this.r.scene.remove(this.map.group);
     if (this.racingLine) { this.r.scene.remove(this.racingLine.mesh); this.racingLine.dispose(); }
+    this.pits?.dispose();
     this.r.scene.remove(this.effects.group);
     if (this.car) this.r.scene.remove(this.car.visual.root);
     for (const b of this.bots.values()) this.r.scene.remove(b.car.visual.root);

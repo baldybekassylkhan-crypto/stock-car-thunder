@@ -56,6 +56,8 @@ export interface AidCar {
   speed: number;
   /** The physics car, if this peer simulates it (only those get flaps, warnings, penalties). */
   car: Car | null;
+  /** In the pit lane: no drag flap, no track limits. */
+  inPit?: boolean;
 }
 
 interface CarState { idx: number; eligible: number; offT: number; warn: number; cool: number }
@@ -111,11 +113,11 @@ export class RaceAids {
         }
         const zi = this.zones.findIndex((zone) => within(idx, zone.start, zone.end));
         if (zi < 0 && s.eligible >= 0 && !within(idx, this.zones[s.eligible].detect, this.zones[s.eligible].end)) s.eligible = -1;
-        c.car.drsAllowed = race.drs && zi >= 0 && zi === s.eligible && !this.yellow.has(c.slot);
+        c.car.drsAllowed = race.drs && zi >= 0 && zi === s.eligible && !this.yellow.has(c.slot) && !c.inPit;
       } else c.car.drsAllowed = false;
       // ---- track limits (road courses) ----
       s.cool -= dt;
-      if (this.roadCourse && green && c.speed > 15) {
+      if (this.roadCourse && green && c.speed > 15 && !c.inPit) {
         const lat = tr.lateral(c.pos, idx);
         const off = lat < -1.25 || lat > tr.width + 1.25;
         s.offT = off ? s.offT + dt : 0;

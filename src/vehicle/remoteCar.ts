@@ -21,7 +21,7 @@ const _qb = new THREE.Quaternion();
  * so our car collides with it solidly.
  */
 export class RemoteCar {
-  readonly visual: CarVisual;
+  visual: CarVisual;
   readonly body: RAPIER.RigidBody;
   readonly collider: RAPIER.Collider;
   private buf: Snap[] = [];
@@ -33,9 +33,11 @@ export class RemoteCar {
   private flap = 0;
   private charred = false;
   readonly goneApplied = new Set<PartName>();
+  private opts: { number: number; color: string; seed: number };
   static readonly DELAY = 0.12;
 
   constructor(private physics: PhysicsWorld, readonly slot: number, opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, readonly spec: CarSpec = carSpec(undefined)) {
+    this.opts = opts;
     this.visual = buildCarModel(opts, spec);
     buildLod(this.visual);
     this.body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(pos.x, pos.y, pos.z).setRotation(quat));
@@ -108,6 +110,16 @@ export class RemoteCar {
     if (s.exploded && !this.charred) this.char();
     // parts missing in the state but still attached (e.g. a lost detach event): just hide them
     for (const g of s.gone) if (!this.goneApplied.has(g)) { this.goneApplied.add(g); hidePart(v, v.parts[g], g); }
+  }
+
+  /** The owner repaired the car in the pits: fresh bodywork. Returns the old visual to remove from the scene. */
+  rebuild(): CarVisual {
+    const old = this.visual;
+    this.visual = buildCarModel(this.opts, this.spec);
+    buildLod(this.visual);
+    this.goneApplied.clear();
+    this.charred = false;
+    return old;
   }
 
   char() {

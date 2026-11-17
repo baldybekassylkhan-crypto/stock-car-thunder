@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Track } from './track';
 import type { ColliderMesh } from './build';
+import type { PitInfo } from '../race/pits';
 
 export interface Atmosphere {
   sunElevation: number; // degrees
@@ -42,6 +43,8 @@ export interface LoadedMap {
   groundY?: number;
   /** Lateral distance beyond which a car counts as having left the circuit (auto reset). */
   outOfBounds: number;
+  /** Pit lane (pit stops). */
+  pit?: PitInfo;
 }
 
 export interface GridLayout {

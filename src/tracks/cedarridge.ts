@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Track, resampleClosed, smoothClosed } from './track';
-import { ribbon, toCollider, type ColliderMesh } from './build';
+import { ribbon, toCollider, buildPitLane, type ColliderMesh } from './build';
 import type { LoadedMap, MapLoadOptions } from './maps';
 import { makeGrid } from './maps';
 import * as tex from '../render/textures';
@@ -92,7 +92,17 @@ export async function loadCedarRidge(o: MapLoadOptions): Promise<LoadedMap> {
   // outside of a left turn (κ>0) is the right side
   const outR = smoothArr(kap.map((x, i) => (x > 0 ? turn[i] : 0)), 25);
   const outL = smoothArr(kap.map((x, i) => (x < 0 ? turn[i] : 0)), 25);
-  const runL = outL.map((t) => 9 + 22 * t);
+  // pit lane beside the main straight (left side): widen the run-off there to fit it
+  const PIT = { from: -250, to: 60, taper: 45, wallD: 9, laneWidth: 7, boxSpacing: 6 };
+  // 0..1: how much of the pit-lane run-off is needed here (ramps in/out over 60 samples so the
+  // barrier moves out smoothly ahead of the pit entry instead of stepping across the lane)
+  const pitRun = (i: number) => {
+    const k = ((i - track.wrap(PIT.from)) % n + n) % n, len = PIT.to - PIT.from;
+    if (k <= len) return 1;
+    const before = n - k, after = k - len;
+    return THREE.MathUtils.smoothstep(1 - Math.min(before, after) / 60, 0, 1);
+  };
+  const runL = outL.map((t, i) => Math.max(9 + 22 * t, 9 + (PIT.wallD + 0.6 + PIT.laneWidth + 2 - 9) * pitRun(i)));
   const runR = outR.map((t) => 9 + 22 * t);
   const CURB = 1.4;
 
@@ -402,10 +412,15 @@ export async function loadCedarRidge(o: MapLoadOptions): Promise<LoadedMap> {
     return s;
   };
 
+  const pitLane = buildPitLane(track, PIT);
+  group.add(pitLane.group);
+  colliders.push(...pitLane.colliders);
+
   return {
     track,
     group,
     colliders,
+    pit: pitLane.pit,
     tvCams,
     gridSlot: makeGrid(track, { backM: 12, rowM: 9, lanes: [3.8, 9.2] }),
     paceSpeed: 26,
