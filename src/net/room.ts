@@ -19,6 +19,8 @@ export interface RoomSettings {
   mode?: 'race' | 'arena' | 'drift';
   /** Drift mode: session length in minutes. */
   driftMinutes?: number;
+  /** Races: cars far behind the leader get a catch-up boost (default on). */
+  catchup?: boolean;
   /** Offer every track regardless of series. */
   anyTrack?: boolean;
   /** Arena options: AI opponents, modifiers ('off' | 'random' | an event id), time limit (s, 0 = none). */

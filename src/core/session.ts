@@ -789,6 +789,7 @@ export class Session {
     this.carLimit = easeLimit(this.carLimit, Math.min(limit, this.yellowLimit(this.self)), this.car.telemetry.speed, dt);
     this.car.speedLimit = Math.min(this.carLimit, this.pits?.speedCap(this.self) ?? Infinity);
     this.driveBots(dt, limit);
+    this.updateCatchup(dt);
     this.computeDraft();
     this.updateAids(dt);
 
@@ -1172,6 +1173,28 @@ export class Session {
     }
   }
 
+  /**
+   * Catch-up: in a race, the further a car is behind the leader the more power and the less drag
+   * it gets (up to +20 % power, -15 % drag and +7 % grip, from ~25 m to ~375 m back), so the cars at the back
+   * keep a chance. Applies to our own car and, on the host, to the AI.
+   */
+  private updateCatchup(dt: number) {
+    const on = this.cfg.catchup !== false && this.cfg.laps > 0 && !this.drift && this.race.phase === 'green';
+    const st = this.race.st;
+    const leader = st.find((s) => s.pos === 1);
+    const len = this.map.track.length;
+    const boost = (slot: number) => {
+      if (!on || !leader) return 0;
+      const me = st.find((s) => s.slot === slot);
+      if (!me || me.status !== 0 || me.slot === leader.slot) return 0;
+      const behind = (leader.lap + leader.frac - (me.lap + me.frac)) * len;
+      return THREE.MathUtils.clamp((behind - 25) / 350, 0, 1);
+    };
+    const ease = (car: Car, target: number) => { car.catchup += (target - car.catchup) * Math.min(1, dt * 0.6); };
+    if (!this.spectator) ease(this.car, boost(this.self));
+    for (const [slot, b] of this.bots) ease(b.car, boost(slot));
+  }
+
   /** Speed limit inside a local yellow zone (near a crash or a stopped car); no limit elsewhere. */
   private yellowLimit(slot: number) {
     if (this.drift) return Infinity;
@@ -1239,6 +1262,7 @@ export class Session {
     else if (this.pits?.playerHint()) status = this.pits.playerHint()!;
     else if (this.pits && this.pits.speedCap(this.self) < Infinity) status = `PIT LIMITER ${Math.round(this.pits.limit * (settings.units === 'mph' ? 2.237 : 3.6))} ${settings.units === 'mph' ? 'MPH' : 'KM/H'}`;
     else if (this.localYellow) status = 'YELLOW FLAG — CRASH AHEAD, SLOW DOWN, NO OVERTAKING';
+    else if (this.car.catchup > 0.2) status = `CATCH-UP BOOST · +${Math.round(this.car.catchup * 20)}% POWER`;
     else if (this.car.fuel <= 0) status = 'OUT OF FUEL';
     else if (this.race.phase === 'loading') status = 'WAITING FOR DRIVERS…';
     else if (dmg.fire > 0) status = 'ON FIRE!';

@@ -112,6 +112,8 @@ export class Car {
   private steerAngle = 0;
   /** Body slip angle (rad): + when travelling to the left of where the nose points. */
   slipAngle = 0;
+  /** Catch-up boost 0..1 for cars far behind the leader (up to +20 % power, -15 % drag, +7 % grip). */
+  catchup = 0;
   private reverseTimer = 0;
   private prevPos = new THREE.Vector3();
   private prevQuat = new THREE.Quaternion();
@@ -311,7 +313,7 @@ export class Car {
     if (this.shiftTimer > 0) this.shiftTimer -= dt;
     let torque = 0;
     if (this.shiftTimer <= 0) {
-      torque = limiter || this.fuel <= 0 ? 0 : torqueAt(CAR.torque, rpm) * throttle * this.damage.power * this.combat.power;
+      torque = limiter || this.fuel <= 0 ? 0 : torqueAt(CAR.torque, rpm) * throttle * this.damage.power * this.combat.power * (1 + 0.2 * this.catchup);
       if (throttle < 0.05) torque = -(40 + rpm * 0.012) * THREE.MathUtils.clamp(Math.abs(vFwd) / 5, 0, 1); // engine braking (only when rolling)
     }
     let driveForce = (torque * ratio * CAR.finalDrive * 0.88) / WHEEL_RADIUS;
@@ -417,7 +419,7 @@ export class Car {
       // grip
       const grip = SURFACE_GRIP[w.surface];
       const loadSens = 1 - Math.min(0.25, (fs / 5000) * 0.07);
-      const fMax = (CAR.drift && !w.front ? CAR.drift.rearGrip : 1) * CAR.mu * grip * loadSens * fs * this.gripScale * this.damage.cornerGrip(i) * this.tyres.grip(i, this.wetTrack) * this.combat.grip;
+      const fMax = (CAR.drift && !w.front ? CAR.drift.rearGrip : 1) * (1 + 0.07 * this.catchup) * CAR.mu * grip * loadSens * fs * this.gripScale * this.damage.cornerGrip(i) * this.tyres.grip(i, this.wetTrack) * this.combat.grip;
       const mCorner = this.mass / 4;
 
       // lateral demand first (traction control leaves room for it)
@@ -526,7 +528,7 @@ export class Car {
     // ---------- aerodynamics ----------
     const rho = 1.225;
     const drs = this.drsOpen && CAR.drs ? CAR.drs : null;
-    const dragMag = 0.5 * rho * CAR.dragCdA * (drs ? drs.drag : 1) * (1 + this.damage.dragAdd) * (1 - this.draft) * speed * speed;
+    const dragMag = 0.5 * rho * CAR.dragCdA * (drs ? drs.drag : 1) * (1 + this.damage.dragAdd) * (1 - this.draft) * (1 - 0.15 * this.catchup) * speed * speed;
     if (speed > 0.1) b.applyImpulse({ x: (-_lin.x / speed) * dragMag * dt, y: (-_lin.y / speed) * dragMag * dt, z: (-_lin.z / speed) * dragMag * dt }, true);
     const down = 0.5 * rho * CAR.liftClA * vFwd * vFwd;
     // roof flaps: deploy when travelling backwards/sideways fast, killing lift so the car stays down

@@ -164,6 +164,7 @@ The third mode in the lobby (**🌀 Drift**, next to Race and Demolition Arena):
 ## Racing extras
 
 - **Slipstream:** tuck in behind another car and two white air lines stream along both sides of your car, with a SLIPSTREAM meter; the tow cuts your drag by up to about a third.
+- **Catch-up:** in races, cars far behind the leader get more power, less drag and a little more grip (up to +20 % / −15 % / +7 %, growing from ~25 m to ~375 m back), so the back of the field keeps a chance. The host can turn it off in the lobby.
 - **Name tags** float above every other car; while spectating a banner shows who you're watching.
 
 ## Track detail

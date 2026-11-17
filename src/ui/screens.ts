@@ -200,6 +200,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
           <div class="row">
             <div${drift ? ' style="display:none"' : ''}><label>AI drivers</label><select id="bots">${Array.from({ length: MAX_GRID }, (_, i) => `<option value="${i}">${i}</option>`).join('')}</select></div>
             <div><label>Weather</label><select id="weather"><option value="dry">Dry</option><option value="rain">Rain</option></select></div>
+            <div${drift ? ' style="display:none"' : ''}><label title="Cars far behind the leader get more power so they keep a chance">Catch-up</label><select id="catchup"><option value="1">On</option><option value="0">Off</option></select></div>
           </div>
           <div class="row">
             <div${drift ? ' style="display:none"' : ''}><label>Series</label><select id="series">${(Object.keys(SERIES_LABEL) as Series[]).filter((k) => k !== 'drift').map((k) => `<option value="${k}">${SERIES_LABEL[k]}</option>`).join('')}</select></div>
@@ -314,6 +315,9 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
     botsSel.querySelectorAll('option').forEach((o) => (o.disabled = Number(o.value) > maxBots));
     botsSel.value = String(Math.min(s.bots, maxBots));
     weatherSel.value = s.weather;
+    const cu = $<HTMLSelectElement>('#catchup')!;
+    cu.value = s.catchup === false ? '0' : '1';
+    cu.disabled = !room.isHost;
     weatherSel.disabled = !room.isHost || !map.weather;
     if (!map.weather) weatherSel.value = 'dry';
     renderCar();
@@ -349,6 +353,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
   root.querySelector<HTMLInputElement>('#anytrack')?.addEventListener('change', (e) => { room.setSettings({ anyTrack: (e.target as HTMLInputElement).checked }); render(); });
   dmgSel.addEventListener('change', () => room.setSettings({ damage: dmgSel.value as Room['settings']['damage'] }));
   botsSel.addEventListener('change', () => { room.setSettings({ bots: Number(botsSel.value) }); render(); });
+  $<HTMLSelectElement>('#catchup')!.addEventListener('change', (e) => room.setSettings({ catchup: (e.target as HTMLSelectElement).value === '1' }));
   weatherSel.addEventListener('change', () => room.setSettings({ weather: weatherSel.value as 'dry' | 'rain' }));
   $('#leave')!.addEventListener('click', h.leave);
   $('#start')?.addEventListener('click', h.start);
