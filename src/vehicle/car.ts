@@ -110,6 +110,8 @@ export class Car {
   private gear = 1;
   private shiftTimer = 0;
   private steerAngle = 0;
+  /** Body slip angle (rad): + when travelling to the left of where the nose points. */
+  slipAngle = 0;
   private reverseTimer = 0;
   private prevPos = new THREE.Vector3();
   private prevQuat = new THREE.Quaternion();
@@ -287,8 +289,14 @@ export class Car {
     }
 
     const steerLock = THREE.MathUtils.lerp(CAR.steerLock[0], CAR.steerLock[1], THREE.MathUtils.smoothstep(Math.abs(vFwd), 3, 62));
-    const targetSteer = steerIn * steerLock * this.damage.steerFactor * this.combat.steer + this.damage.steerPull;
-    const steerRate = 2.2;
+    let targetSteer = steerIn * steerLock * this.damage.steerFactor * this.combat.steer + this.damage.steerPull;
+    // drift assist: the front wheels follow the direction of travel (automatic countersteer), and
+    // the driver's input steers on top of that, so holding a slide is easy
+    this.slipAngle = vFwd > 3 ? Math.atan2(_lin.dot(_left), vFwd) : 0;
+    if (CAR.drift && vFwd > 3 && !held) {
+      targetSteer = THREE.MathUtils.clamp(targetSteer - this.slipAngle * CAR.drift.assist, -CAR.steerLock[0], CAR.steerLock[0]);
+    }
+    const steerRate = CAR.drift ? 4.5 : 2.2;
     this.steerAngle += THREE.MathUtils.clamp(targetSteer - this.steerAngle, -steerRate * dt, steerRate * dt);
 
     // ---------- engine / gearbox ----------
@@ -409,7 +417,7 @@ export class Car {
       // grip
       const grip = SURFACE_GRIP[w.surface];
       const loadSens = 1 - Math.min(0.25, (fs / 5000) * 0.07);
-      const fMax = CAR.mu * grip * loadSens * fs * this.gripScale * this.damage.cornerGrip(i) * this.tyres.grip(i, this.wetTrack) * this.combat.grip;
+      const fMax = (CAR.drift && !w.front ? CAR.drift.rearGrip : 1) * CAR.mu * grip * loadSens * fs * this.gripScale * this.damage.cornerGrip(i) * this.tyres.grip(i, this.wetTrack) * this.combat.grip;
       const mCorner = this.mass / 4;
 
       // lateral demand first (traction control leaves room for it)
@@ -419,15 +427,18 @@ export class Car {
 
       // longitudinal
       let fx = 0;
-      if (!w.front) {
+      const tc = this.tractionControl && !CAR.drift; // drift cars need wheelspin
+      const handbrake = !!input.handbrake && !w.front && !held && Math.abs(vf) > 1;
+      if (!w.front && !handbrake) {
         let d = driveLeft / 2;
-        const limit = this.tractionControl ? Math.sqrt(Math.max(0, (0.95 * fMax) ** 2 - fyDemand * fyDemand)) + fMax * 0.05 : fMax;
+        const limit = tc ? Math.sqrt(Math.max(0, (0.95 * fMax) ** 2 - fyDemand * fyDemand)) + fMax * 0.05 : fMax;
         if (Math.abs(d) > limit) {
-          if (this.tractionControl) d = Math.sign(d) * limit;
-          else { w.spinning = true; d = Math.sign(d) * fMax * 0.82; }
+          if (tc) d = Math.sign(d) * limit;
+          else { w.spinning = true; d = Math.sign(d) * fMax * (CAR.drift ? 0.9 : 0.82); }
         }
         fx += d;
       }
+      if (handbrake) { w.locked = true; fx -= Math.sign(vf) * fMax * 0.7; }
       const bf = brake * CAR.brakeForce * this.brakeEff * (w.front ? 1 : (1 - CAR.brakeBias) / CAR.brakeBias);
       if (bf > 0) {
         let fb = bf;
@@ -442,7 +453,7 @@ export class Car {
 
       // lateral (simplified Pacejka with low-speed stabilisation)
       let fy = -fMax * Math.sin(C * Math.atan(B * alpha));
-      if (w.locked) fy *= 0.35;
+      if (w.locked) fy *= handbrake ? 0.45 : 0.35;
       const fyCap = (mCorner * Math.abs(vl)) / dt;
       if (Math.abs(vf) < 6) fy = THREE.MathUtils.clamp(fy, -fyCap, fyCap);
 
@@ -473,7 +484,7 @@ export class Car {
     // When the car yaws faster than the steering asks for (the rear stepping out), a yaw torque
     // pulls it back. It never adds rotation, so understeer stays understeer.
     const grounded = this.wheels.filter((w) => w.contact).length >= 3;
-    if (this.stability && grounded && !held && vFwd > 8) {
+    if (this.stability && !CAR.drift && grounded && !held && vFwd > 8) {
       const yaw = _ang.dot(_up);
       const L = CAR.geo.wheelbaseF - CAR.geo.wheelbaseR;
       const cap = (CAR.mu * 9.81 * 1.15) / vFwd;
@@ -486,6 +497,23 @@ export class Car {
         const k = -Math.sign(excess) * Math.min(1.2, Math.abs(excess) - dead) * gain * CAR.inertia.y * dt;
         b.applyTorqueImpulse({ x: _up.x * k, y: _up.y * k, z: _up.z * k }, true);
       }
+    }
+
+    // drift assist, part two: past ~55 degrees of slide a yaw torque stops the car rotating further,
+    // so an over-ambitious drift straightens up instead of spinning round
+    if (CAR.drift && grounded && !held && vFwd > 4) {
+      const yaw = _ang.dot(_up);
+      const beta = this.slipAngle;
+      const lim = 0.95;
+      // the slide grows when the car rotates away from its direction of travel
+      const growing = yaw * -Math.sign(beta) > 0;
+      if (Math.abs(beta) > lim && growing) {
+        const k = -yaw * Math.min(1, (Math.abs(beta) - lim) * 3) * 6 * CAR.drift.assist * CAR.inertia.y * dt;
+        b.applyTorqueImpulse({ x: _up.x * k, y: _up.y * k, z: _up.z * k }, true);
+      }
+      // gentle yaw damping keeps the slide smooth
+      const kd = -yaw * 0.6 * CAR.drift.assist * CAR.inertia.y * dt;
+      b.applyTorqueImpulse({ x: _up.x * kd, y: _up.y * kd, z: _up.z * kd }, true);
     }
 
     // ---------- aerodynamics ----------

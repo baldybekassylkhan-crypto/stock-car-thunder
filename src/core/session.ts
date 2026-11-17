@@ -22,6 +22,7 @@ import { readDriverInput, wasPressed, clearPressed, resetHeld, readMouseLook, RE
 import { settings } from './profile';
 import { encodeState, decodeState } from '../net/codec';
 import { addTrackDetail } from '../tracks/detail';
+import { DriftScorer, DriftHud } from '../race/drift';
 import { RaceDirector, easeLimit, type RaceSnapshot, type ResultRow } from '../race/race';
 import { PART_NAMES, type PartName, type CarVisual } from '../vehicle/carModel';
 import type { LoadedMap, MapDef } from '../tracks/maps';
@@ -39,9 +40,14 @@ export interface GridEntry {
   tyre?: Compound;
 }
 
+/** Drift session result row. */
+export interface DriftRow { slot: number; name: string; car: string; color: string; number: number; score: number; best: number }
+
 export interface SessionCallbacks {
   onPause: (paused: boolean, api: { resume(): void; reset(): void; exit(): void }) => void;
   onResults: (rows: ResultRow[], grid: GridEntry[]) => void;
+  /** Drift mode: the timed session is over. */
+  onDriftResults?: (rows: DriftRow[]) => void;
   onExit: () => void;
 }
 
@@ -96,6 +102,16 @@ export class Session {
   private resetHold = 0;
   private spectating = -1;
   private destroyedAt = -1;
+  // ---- drift mode ----
+  /** Drift mode: a timed free session scored on drifting (no AI, no flags, no pit stops). */
+  readonly drift: boolean;
+  private driftScorer = new DriftScorer();
+  private driftHud: DriftHud | null = null;
+  private driftScores = new Map<number, { t: number; b: number }>();
+  private driftStart = -1;
+  private driftEnded = false;
+  private driftSendT = 0;
+  private prevSpeed = 0;
   private scrapeLevel = 0;
   private spotter = '';
   private spotterUntil = 0;
@@ -126,6 +142,12 @@ export class Session {
   ) {
     this.hud = new Hud(hudRoot);
     this.hud.show(false);
+    this.drift = cfg.mode === 'drift';
+    if (this.drift) {
+      this.driftHud = new DriftHud(hudRoot);
+      this.driftHud.show(false);
+      hudRoot.classList.add('drift-mode');
+    } else hudRoot.classList.remove('drift-mode');
     this.isHost = room.isHost;
     this.self = room.selfSlot;
     this.spectator = !grid.some((g) => g.slot === this.self);
@@ -190,11 +212,12 @@ export class Session {
         destroyed: () => this.destroyedOf(g.slot),
         inPit: () => !!this.pits?.inLane(g.slot),
       }));
-      this.director = new RaceDirector(tr, this.cfg.laps, entrants, (slot) => gridPos(slot).i, this.map.paceSpeed, this.cfg.series);
+      this.director = new RaceDirector(tr, this.cfg.laps, entrants, (slot) => gridPos(slot).i, this.map.paceSpeed, this.cfg.series === 'gp' ? 'gp' : 'stock');
     }
 
-    this.aids = new RaceAids(tr, !this.map.oval, this.grid.some((g) => !!carSpec(g.car).drs));
-    if (this.map.pit) this.setupPits(this.map.pit);
+    // drift sessions: no track-limit penalties and no pit stops (you're meant to go wide and sideways)
+    this.aids = new RaceAids(tr, !this.map.oval && !this.drift, this.grid.some((g) => !!carSpec(g.car).drs));
+    if (this.map.pit && !this.drift) this.setupPits(this.map.pit);
     if (settings.racingLine) { this.racingLine = new RacingLine(this.car, tr, this.map.oval); this.r.scene.add(this.racingLine.mesh); }
     this.rig = new CameraRig(this.r.camera, this.map.tvCams);
     const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 });
@@ -257,7 +280,7 @@ export class Session {
     if (this.started || !this.director) return;
     this.started = true;
     this.director.start();
-    this.flash(this.cfg.laps ? `${this.cfg.laps} LAPS — GET READY` : 'FREE PRACTICE', 3);
+    this.flash(this.drift ? 'DRIFT SESSION — GET SIDEWAYS!' : this.cfg.laps ? `${this.cfg.laps} LAPS — GET READY` : 'FREE PRACTICE', 3);
   }
 
   applyAssists() {
@@ -318,6 +341,12 @@ export class Session {
         break;
       case 'results':
         if (!this.isHost) this.cb.onResults(p.rows as ResultRow[], this.grid);
+        break;
+      case 'dscore':
+        if (p.s === from || this.isHost) this.driftScores.set(Number(p.s), { t: Number(p.t) || 0, b: Number(p.b) || 0 });
+        break;
+      case 'dresults':
+        if (!this.isHost) this.cb.onDriftResults?.(p.rows as DriftRow[]);
         break;
       case 'dents': {
         const rc = this.remotes.get(p.s);
@@ -748,7 +777,7 @@ export class Session {
     const input = this.paused ? { steer: 0, throttle: 0, brake: 0.3, shiftUp: false, shiftDown: false } : auto ? auto(this) : interactive ? readDriverInput(dt, Math.abs(this.car.telemetry.speed)) : { steer: 0, throttle: 0, brake: 0, shiftUp: false, shiftDown: false };
     if (this.penalty > 0) this.penalty -= dt;
     this.pits?.update(dt, [this.self, ...this.bots.keys()]);
-    this.car.inputLocked = limit === 0 || this.penalty > 0 || !!this.pits?.held(this.self);
+    this.car.inputLocked = limit === 0 || this.penalty > 0 || !!this.pits?.held(this.self) || this.driftEnded;
     this.carLimit = easeLimit(this.carLimit, Math.min(limit, this.yellowLimit(this.self)), this.car.telemetry.speed, dt);
     this.car.speedLimit = Math.min(this.carLimit, this.pits?.speedCap(this.self) ?? Infinity);
     this.driveBots(dt, limit);
@@ -870,7 +899,56 @@ export class Session {
     }
     this.updateSpotter();
     this.racingLine?.update(this.progress.index);
+    this.updateDrift(dt, interactive);
     if (interactive) this.updateHud(tm);
+  }
+
+  /** Drift mode: scoring, the session clock, sharing scores, and the end of the session. */
+  private updateDrift(dt: number, interactive: boolean) {
+    if (!this.drift) return;
+    const green = this.race.phase === 'green';
+    if (green && this.driftStart < 0) this.driftStart = this.time;
+    const dur = Math.max(1, this.cfg.driftMinutes ?? 3) * 60;
+    const left = this.driftStart < 0 ? dur : dur - (this.time - this.driftStart);
+    const speed = Math.abs(this.car.telemetry.speed);
+    // a hard hit (sudden loss of speed) ends the combo
+    const crashed = dt > 0 && (this.prevSpeed - speed) / dt > 28;
+    this.prevSpeed = speed;
+    const active = green && left > 0 && !this.spectator && !this.car.damage.destroyed && !this.driftEnded;
+    this.driftScorer.update(dt, this.car.slipAngle, speed, crashed || this.car.damage.destroyed, active);
+    if (!this.spectator) this.driftScores.set(this.self, { t: this.driftScorer.total, b: this.driftScorer.best });
+    this.driftSendT -= dt;
+    if (!this.spectator && this.driftSendT <= 0 && !this.driftEnded) {
+      this.driftSendT = 0.5;
+      this.room.sendEvent('dscore', { s: this.self, t: Math.round(this.driftScorer.total), b: Math.round(this.driftScorer.best) });
+    }
+    if (this.driftStart >= 0 && left <= 0 && !this.driftEnded) {
+      this.driftEnded = true;
+      this.driftScorer.bank();
+      if (!this.spectator) {
+        this.driftScores.set(this.self, { t: this.driftScorer.total, b: this.driftScorer.best });
+        this.room.sendEvent('dscore', { s: this.self, t: Math.round(this.driftScorer.total), b: Math.round(this.driftScorer.best) });
+      }
+      this.flash('TIME! SESSION OVER', 3, '#ffcc00');
+      if (this.isHost) setTimeout(() => {
+        if (this.disposed) return;
+        const rows = this.driftRows();
+        this.room.sendEvent('dresults', { rows });
+        this.cb.onDriftResults?.(rows);
+      }, 2500);
+    }
+    if (interactive && this.driftHud) {
+      this.driftHud.show(true);
+      const board = this.grid.filter((g) => !g.bot).map((g) => ({ name: g.nickname, score: this.driftScores.get(g.slot)?.t ?? 0, self: g.slot === this.self })).sort((a, b) => b.score - a.score);
+      this.driftHud.update(this.driftScorer.state(), left, this.driftScorer.message, board);
+    }
+  }
+
+  private driftRows(): DriftRow[] {
+    return this.grid.filter((g) => !g.bot).map((g) => {
+      const sc = this.driftScores.get(g.slot);
+      return { slot: g.slot, name: g.nickname, car: carSpec(g.car).name, color: g.color, number: g.number, score: Math.round(sc?.t ?? 0), best: Math.round(sc?.b ?? 0) };
+    }).sort((a, b) => b.score - a.score);
   }
 
   private setupPits(info: NonNullable<LoadedMap['pit']>) {
@@ -878,7 +956,7 @@ export class Session {
     const pits = new PitManager(this.map.track, info, {
       isHost: this.isHost,
       self: this.self,
-      series: this.cfg.series,
+      series: this.cfg.series === 'gp' ? 'gp' : 'stock',
       rain: this.map.rain,
       laps: this.cfg.laps,
       scene: this.r.scene,
@@ -1044,6 +1122,7 @@ export class Session {
 
   /** Speed limit inside a local yellow zone (near a crash or a stopped car); no limit elsewhere. */
   private yellowLimit(slot: number) {
+    if (this.drift) return Infinity;
     return this.race.phase === 'green' && this.aids?.yellow.has(slot) ? this.map.paceSpeed * 1.2 : Infinity;
   }
 
@@ -1158,6 +1237,7 @@ export class Session {
     cancelAnimationFrame(this.raf);
     this.audio?.dispose();
     this.hud.show(false);
+    this.driftHud?.dispose();
     if (this.map) this.r.scene.remove(this.map.group);
     if (this.racingLine) { this.r.scene.remove(this.racingLine.mesh); this.racingLine.dispose(); }
     this.pits?.dispose();

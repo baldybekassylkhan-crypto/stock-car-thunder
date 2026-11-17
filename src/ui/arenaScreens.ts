@@ -14,8 +14,8 @@ export const ARENA_MAX = 16;
 export interface ArenaLobbyHandlers {
   start(): void;
   leave(): void;
-  /** Host switched the room's mode (race / arena). */
-  mode?(m: 'race' | 'arena'): void;
+  /** Host switched the room's mode (race / drift / arena). */
+  mode?(m: 'race' | 'arena' | 'drift'): void;
 }
 
 /** What a level unlocks (for the results screen). */

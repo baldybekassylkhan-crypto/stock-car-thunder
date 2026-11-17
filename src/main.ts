@@ -7,7 +7,7 @@ import { MAPS } from './tracks/maps';
 import { carSpec, carsOf } from './vehicle/catalog';
 import { MAX_GRID } from './net/transport';
 import {
-  nicknameScreen, mainMenu, loadingScreen, pauseScreen, garageScreen, clearUI, lobbyScreen, resultsScreen,
+  nicknameScreen, mainMenu, loadingScreen, pauseScreen, garageScreen, clearUI, lobbyScreen, resultsScreen, driftResultsScreen,
   messageScreen, resetChat, BOT_NAMES, type Nav,
 } from './ui/screens';
 import { ArenaSession, type ArenaEntry, type ArenaSettings } from './arena/arenaSession';
@@ -101,8 +101,11 @@ function showLobby() {
   if (!room) return;
   const r = room;
   const mode = r.settings.mode ?? 'race';
-  const setMode = (m: 'race' | 'arena') => {
-    r.setSettings({ mode: m, arena: r.settings.arena ?? { bots: 7, events: 'off', timeLimit: 0 } });
+  const setMode = (m: 'race' | 'arena' | 'drift') => {
+    const s = r.settings;
+    // drift runs the drift series on the drift park; leaving drift goes back to stock cars
+    if (m === 'drift') r.setSettings({ mode: m, series: 'drift', sameCar: '', map: 'driftpark', driftMinutes: s.driftMinutes ?? 3 });
+    else r.setSettings({ mode: m, arena: s.arena ?? { bots: 7, events: 'off', timeLimit: 0 }, ...(s.series === 'drift' ? { series: 'stock' as const, sameCar: '', map: 'sunvale' } : {}) });
     showLobby();
   };
   r.onLobby = () => {}; // the previous lobby's listener must not fire while the new one is built
@@ -113,17 +116,19 @@ function showLobby() {
   r.onLobby = () => { if ((r.settings.mode ?? 'race') !== mode) showLobby(); else render(); };
 }
 
-function showRaceLobby(r: Room, setMode: (m: 'race' | 'arena') => void) {
+function showRaceLobby(r: Room, setMode: (m: 'race' | 'arena' | 'drift') => void) {
   lobbyScreen(r, {
     mode: setMode,
     leave: () => leaveRoom(),
     start: () => {
       const grid = buildGrid(r);
       r.inRace = true;
-      currentStart = { grid, settings: { ...r.settings } };
       r.reserved = new Set(grid.map((g) => g.slot));
-      r.sendEvent('start', { grid, settings: r.settings });
-      void startSession(grid, { ...r.settings });
+      // drift: a free session (no laps, no AI) that the session clock ends
+      const cfg = r.settings.mode === 'drift' ? { ...r.settings, laps: 0, bots: 0 } : { ...r.settings };
+      currentStart = { grid, settings: cfg };
+      r.sendEvent('start', { grid, settings: cfg });
+      void startSession(grid, cfg);
     },
   });
 }
@@ -137,7 +142,7 @@ function buildGrid(r: Room): GridEntry[] {
   const pool = carsOf(series);
   const used = new Set(humans.map((h) => h.slot));
   const bots: GridEntry[] = [];
-  const count = Math.min(r.settings.bots, MAX_GRID - humans.length);
+  const count = r.settings.mode === 'drift' ? 0 : Math.min(r.settings.bots, MAX_GRID - humans.length);
   // AI car numbers: unique and never the same as a human's number
   const takenNumbers = new Set(humans.map((h) => h.number));
   const numbers: number[] = [];
@@ -238,6 +243,12 @@ async function startSession(grid: GridEntry[], cfg: RoomSettings) {
       if (!paused) return clearUI();
       const show = () => pauseScreen({ ...api, settings: () => garageScreen(show, () => { session?.applyAssists(); renderer.setQuality(settings.quality); }), endToLobby: r.isHost ? () => endToLobby(r) : undefined }, !r.offline);
       show();
+    },
+    onDriftResults: (rows) => {
+      driftResultsScreen(rows, r.selfSlot, r.isHost, {
+        leave: () => leaveRoom(),
+        lobby: () => { r.inRace = false; r.sendEvent('lobby-return', {}); endSession(); showLobby(); },
+      });
     },
     onResults: (rows, g) => {
       resultsScreen(rows, g, r.isHost, {

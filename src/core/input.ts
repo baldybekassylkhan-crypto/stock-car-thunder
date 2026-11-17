@@ -9,6 +9,8 @@ export interface DriverInput {
   drs?: boolean;
   /** Deploy the energy boost (held). */
   boost?: boolean;
+  /** Handbrake (held): locks the rear wheels, to start a drift. */
+  handbrake?: boolean;
 }
 
 const keys = new Set<string>();
@@ -90,6 +92,7 @@ export function readDriverInput(dt: number, speed: number): DriverInput {
   let shiftDown = wasPressed('KeyQ');
   let drs = wasPressed('KeyF');
   let boost = isDown('ShiftLeft') || isDown('ShiftRight');
+  let handbrake = isDown('Space');
 
   const pad = navigator.getGamepads?.().find((p) => p && p.connected);
   if (pad) {
@@ -104,10 +107,11 @@ export function readDriverInput(dt: number, speed: number): DriverInput {
     if (b[4] && !prevPadButtons[4]) shiftDown = true;
     if (b[0] && !prevPadButtons[0]) drs = true; // A: drag flap
     if (b[1]) boost = true; // B: hold for boost
+    if (b[0]) handbrake = true; // A held: handbrake (drift cars)
     if (b[3] && !prevPadButtons[3]) pressed.add('KeyC'); // Y: camera
     padResetHeld = !!b[2]; // X: hold to reset
     if (b[9] && !prevPadButtons[9]) pressed.add('Escape'); // Start: pause
     prevPadButtons = b;
   }
-  return { steer, throttle, brake, shiftUp, shiftDown, drs, boost };
+  return { steer, throttle, brake, shiftUp, shiftDown, drs, boost, handbrake };
 }

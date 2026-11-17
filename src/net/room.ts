@@ -2,7 +2,7 @@ import Peer, { type DataConnection } from 'peerjs';
 import { MAX_HUMANS, peerIdForRoom } from './transport';
 import type { Profile } from '../core/profile';
 import type { DamageLevel } from '../damage/damage';
-import { carSpec, type Series } from '../vehicle/catalog';
+import { carSpec, DEFAULT_CAR, type Series } from '../vehicle/catalog';
 import { encodeBatch, splitPacket, statePos } from './codec';
 
 export interface RoomSettings {
@@ -16,7 +16,9 @@ export interface RoomSettings {
   /** '' = every driver picks their own car; otherwise everyone races this car id. */
   sameCar: string;
   /** Racing or the Demolition Arena. */
-  mode?: 'race' | 'arena';
+  mode?: 'race' | 'arena' | 'drift';
+  /** Drift mode: session length in minutes. */
+  driftMinutes?: number;
   /** Offer every track regardless of series. */
   anyTrack?: boolean;
   /** Arena options: AI opponents, modifiers ('off' | 'random' | an event id), time limit (s, 0 = none). */
@@ -65,7 +67,7 @@ type Msg =
 /** Validate car picks from the network: unknown ids fall back to the series default. */
 function cleanCars(c: unknown): Record<Series, string> {
   const o = (c ?? {}) as Record<string, unknown>;
-  return { stock: carSpec(String(o.stock), 'stock').id, gp: carSpec(String(o.gp), 'gp').id };
+  return { stock: carSpec(String(o.stock), 'stock').id, gp: carSpec(String(o.gp), 'gp').id, drift: carSpec(String(o.drift), 'drift').id };
 }
 
 const PEER_OPTS = {
@@ -349,7 +351,7 @@ export class Room {
     const me = this.self;
     if (me) me.arena = { ...a };
     if (this.isHost) this.pushLobby();
-    else this.hostEv?.send({ t: 'car', cars: me?.cars ?? { stock: 'stock-balanced', gp: 'gp-balanced' }, tyre: me?.tyre, arena: { ...a } } satisfies Msg);
+    else this.hostEv?.send({ t: 'car', cars: me?.cars ?? { ...DEFAULT_CAR }, tyre: me?.tyre, arena: { ...a } } satisfies Msg);
   }
 
   /** Change this player's car picks (host applies them, clients ask the host). */

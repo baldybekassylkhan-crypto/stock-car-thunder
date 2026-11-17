@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Track } from './track';
 import type { ColliderMesh } from './build';
 import type { PitInfo } from '../race/pits';
+import type { Series } from '../vehicle/catalog';
 
 export interface Atmosphere {
   sunElevation: number; // degrees
@@ -80,7 +81,7 @@ export interface MapDef {
   /** Rain is offered on this map. */
   weather?: boolean;
   /** Which series race here (the lobby lists these for the room's series). */
-  series: ('stock' | 'gp')[];
+  series: Series[];
   load(opts: MapLoadOptions): Promise<LoadedMap>;
 }
 
@@ -140,7 +141,16 @@ export const MAPS: MapDef[] = [
     series: ['gp'],
     load: () => import('./gpCircuits').then((m) => m.loadDesertRing()),
   },
+  {
+    id: 'driftpark',
+    name: 'Neon Docks Drift Park',
+    subtitle: '1.5 mi · wide, walled drift course · container port at night',
+    swatch: 'linear-gradient(135deg,#ff2bd6,#2b1a5a)',
+    available: true,
+    series: ['drift'],
+    load: () => import('./driftPark').then((m) => m.loadDriftPark()),
+  },
 ];
 
 /** Tracks the lobby offers for a series (all of them with "any track"). */
-export const mapsFor = (series: 'stock' | 'gp', any = false) => MAPS.filter((m) => any || m.series.includes(series));
+export const mapsFor = (series: Series, any = false) => MAPS.filter((m) => any || m.series.includes(series));

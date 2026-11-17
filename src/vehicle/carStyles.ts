@@ -53,6 +53,11 @@ export function applyCarStyle(v: CarVisual, spec: CarSpec) {
     badge(spec.maker, 0.62, 0.12, 0, 0.93, -2.665, Math.PI, 0.25);
     badge(spec.maker, 0.5, 0.1, 0, 0.47, 2.69, 0, -0.35);
 
+    if (spec.series === 'drift') {
+      styleDrift(v, spec.id, { add, rims, accent, carbon, black, chrome });
+      return;
+    }
+
     if (spec.id === 'stock-torque') {
       // chunky: wider and taller body, chrome rims
       body.scale.set(1.05, 1.06, 1);
@@ -147,5 +152,63 @@ function lowerGreenhouse(v: CarVisual, pivotY: number, k: number) {
     c.position.y = pivotY + (c.position.y - pivotY) * k;
     // unrotated pieces are squashed too; tilted ones (pillars, decals) only move down
     if (c.rotation.x === 0 && c.rotation.y === 0 && c.rotation.z === 0) c.scale.y *= k;
+  }
+}
+
+type Kit = {
+  add: (parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, rx?: number, ry?: number, rz?: number) => THREE.Mesh;
+  rims: (color: number, metal?: number, rough?: number) => void;
+  accent: THREE.Material; carbon: THREE.Material; black: THREE.Material; chrome: THREE.Material;
+};
+
+/**
+ * Drift cars: a street-coupe look on the stock body — lower stance, no NASCAR blade spoiler but
+ * a proper wing, front lip, tow hook, coloured rims; each model with its own signature parts.
+ */
+function styleDrift(v: CarVisual, id: string, k: Kit) {
+  const { body, parts } = v;
+  const { add, rims, accent, carbon, black } = k;
+  // NASCAR-only bits off: blade spoiler, roof flaps, window net
+  if (parts.spoiler) parts.spoiler.visible = false;
+  for (const f of v.flaps) f.visible = false;
+  body.children.forEach((c) => { const m = c as THREE.Mesh; if (m.isMesh && (m.material as THREE.MeshBasicMaterial).wireframe) m.visible = false; });
+  // common: front lip and a red tow hook
+  add(body, new THREE.BoxGeometry(1.8, 0.03, 0.22), carbon, 0, 0.11, 2.62);
+  add(body, new THREE.TorusGeometry(0.07, 0.018, 6, 12), new THREE.MeshStandardMaterial({ color: 0xe11d48, roughness: 0.4 }), 0.55, 0.26, 2.72, 0, Math.PI / 2);
+  /** A wing on two struts at the rear deck. */
+  const wing = (w: number, chord: number, h: number, z: number, swan: boolean) => {
+    const g = new THREE.Group();
+    add(g, new THREE.BoxGeometry(w, 0.03, chord), carbon, 0, h, z, -0.12);
+    for (const sx of [1, -1]) {
+      add(g, new THREE.BoxGeometry(0.02, 0.22, chord + 0.12), carbon, sx * w / 2, h - 0.02, z);
+      // struts: swan-neck (from above) or classic (from below)
+      add(g, new THREE.BoxGeometry(0.03, h - 0.98, 0.12), black, sx * 0.42, swan ? (h + 0.98) / 2 + 0.03 : (h + 0.98) / 2, z + 0.05);
+    }
+    body.add(g);
+    return g;
+  };
+  if (id === 'drift-ronin') {
+    body.scale.set(1, 0.96, 1);
+    rims(0xb8862f, 1, 0.3); // bronze
+    wing(1.6, 0.26, 1.24, -2.35, false);
+    for (const sx of [1, -1]) add(body, new THREE.BoxGeometry(0.28, 0.015, 0.12), black, sx * 0.4, 0.935, 1.5, 0.1); // hood vents
+  }
+  if (id === 'drift-kaze') {
+    body.scale.set(0.98, 0.93, 1);
+    rims(0xf2f2f2, 0.6, 0.3); // white
+    wing(1.75, 0.32, 1.42, -2.3, true);
+    for (const sx of [1, -1]) add(body, new THREE.BoxGeometry(0.26, 0.016, 0.14), carbon, sx * 0.86, 0.45, 2.48, 0.25, 0, sx * -0.35); // canards
+    add(body, new THREE.BoxGeometry(0.9, 0.012, 0.5), accent, 0, 0.94, 1.35, 0.1); // contrast hood panel
+  }
+  if (id === 'drift-brute') {
+    body.scale.set(1.06, 0.98, 1);
+    rims(0x18181b, 0.7, 0.35); // black
+    wing(1.7, 0.28, 1.3, -2.35, false);
+    // wide fender flares
+    for (const sx of [1, -1]) for (const z of [1.45, -1.35]) add(body, new THREE.BoxGeometry(0.12, 0.16, 1.0), black, sx * 1.03, 0.55, z);
+    // hood bulge and twin big exhausts
+    const hood = parts.hood;
+    if (hood) add(hood, new THREE.BoxGeometry(0.6, 0.14, 0.8), accent, 0, 0.07, 0);
+    for (const sx of [0.35, 0.6]) add(body, new THREE.CylinderGeometry(0.075, 0.075, 0.3, 12), k.chrome, -sx, 0.24, -2.66, Math.PI / 2);
   }
 }

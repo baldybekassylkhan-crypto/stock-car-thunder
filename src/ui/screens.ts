@@ -104,16 +104,17 @@ export function mainMenu(nav: Nav, prefillCode?: string, notice?: string) {
  * Mode switch shown at the top of the lobby (racing or the Demolition Arena). One room, one lobby:
  * the host picks the mode here and everyone's lobby switches with it.
  */
+export type RoomMode = 'race' | 'arena' | 'drift';
 export function modeTabs(room: Room) {
   const mode = room.settings.mode ?? 'race';
-  const tab = (m: 'race' | 'arena', label: string) => `<button class="mode-tab${mode === m ? ' active' : ''}" data-mode="${m}"${room.isHost ? '' : ' disabled'}>${label}</button>`;
-  return `<div class="mode-tabs">${tab('race', '🏁 Race')}${tab('arena', '💥 Demolition Arena')}${room.isHost ? '' : '<span class="note">The host picks the mode</span>'}</div>`;
+  const tab = (m: RoomMode, label: string) => `<button class="mode-tab${mode === m ? ' active' : ''}" data-mode="${m}"${room.isHost ? '' : ' disabled'}>${label}</button>`;
+  return `<div class="mode-tabs">${tab('race', '🏁 Race')}${tab('drift', '🌀 Drift')}${tab('arena', '💥 Demolition Arena')}${room.isHost ? '' : '<span class="note">The host picks the mode</span>'}</div>`;
 }
 
 /** Wire the mode tabs of a lobby screen. */
-export function wireModeTabs(root: HTMLElement, room: Room, onMode?: (m: 'race' | 'arena') => void) {
+export function wireModeTabs(root: HTMLElement, room: Room, onMode?: (m: RoomMode) => void) {
   root.querySelectorAll<HTMLButtonElement>('.mode-tab').forEach((b) => b.addEventListener('click', () => {
-    const m = b.dataset.mode as 'race' | 'arena';
+    const m = b.dataset.mode as RoomMode;
     if (room.isHost && m !== (room.settings.mode ?? 'race')) onMode?.(m);
   }));
 }
@@ -166,12 +167,14 @@ export function joinScreen(nav: Nav, prefill = '') {
 export interface LobbyHandlers {
   start(): void;
   leave(): void;
-  /** Host switched the room's mode (race / arena). */
-  mode?(m: 'race' | 'arena'): void;
+  /** Host switched the room's mode (race / drift / arena). */
+  mode?(m: RoomMode): void;
 }
 
+/** The race lobby, also used for drift sessions (no AI, session length instead of laps). */
 export function lobbyScreen(room: Room, h: LobbyHandlers) {
   const online = !room.offline;
+  const drift = room.settings.mode === 'drift';
   const link = `${location.origin}${location.pathname}?room=${room.code}`;
   const root = mount(`
     <div class="card wide lobby">
@@ -189,15 +192,17 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
         <div class="stack">
           <div><label>Track <span class="anytrack"><input type="checkbox" id="anytrack" /> any track</span></label><div class="maps" id="maps"></div></div>
           <div class="row">
-            <div><label>Laps</label><select id="laps">${[0, 3, 5, 10, 20, 40].map((l) => `<option value="${l}">${l === 0 ? 'Free practice' : l}</option>`).join('')}</select></div>
+            ${drift
+    ? `<div><label>Session</label><select id="laps">${[2, 3, 5, 10].map((m) => `<option value="${m}">${m} minutes</option>`).join('')}</select></div>`
+    : `<div><label>Laps</label><select id="laps">${[0, 3, 5, 10, 20, 40].map((l) => `<option value="${l}">${l === 0 ? 'Free practice' : l}</option>`).join('')}</select></div>`}
             <div><label>Damage</label><select id="dmg"><option value="realistic">Realistic</option><option value="brutal">Brutal</option><option value="off">Off (visual only)</option></select></div>
           </div>
           <div class="row">
-            <div><label>AI drivers</label><select id="bots">${Array.from({ length: MAX_GRID }, (_, i) => `<option value="${i}">${i}</option>`).join('')}</select></div>
+            <div${drift ? ' style="display:none"' : ''}><label>AI drivers</label><select id="bots">${Array.from({ length: MAX_GRID }, (_, i) => `<option value="${i}">${i}</option>`).join('')}</select></div>
             <div><label>Weather</label><select id="weather"><option value="dry">Dry</option><option value="rain">Rain</option></select></div>
           </div>
           <div class="row">
-            <div><label>Series</label><select id="series">${(Object.keys(SERIES_LABEL) as Series[]).map((k) => `<option value="${k}">${SERIES_LABEL[k]}</option>`).join('')}</select></div>
+            <div${drift ? ' style="display:none"' : ''}><label>Series</label><select id="series">${(Object.keys(SERIES_LABEL) as Series[]).filter((k) => k !== 'drift').map((k) => `<option value="${k}">${SERIES_LABEL[k]}</option>`).join('')}</select></div>
             <div><label>Cars</label><select id="samecar"></select></div>
           </div>
         </div>
@@ -225,7 +230,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
           </div>
       <div class="row" style="margin-top:16px">
         <button class="btn ghost" id="leave">${online ? 'Leave room' : 'Back'}</button>
-        ${room.isHost ? '<button class="btn" id="start">Start race</button>' : '<button class="btn" id="ready">Ready</button>'}
+        ${room.isHost ? `<button class="btn" id="start">${drift ? 'Start drift session' : 'Start race'}</button>` : '<button class="btn" id="ready">Ready</button>'}
       </div>
       <div class="note" id="hint" style="margin-top:8px"></div>
     </div>`);
@@ -302,7 +307,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
         <div class="sw" style="background:${m.swatch}"></div>
         <div><b>${m.name}</b><small>${m.subtitle}</small></div>
       </div>`).join('');
-    lapsSel.value = String(s.laps);
+    lapsSel.value = drift ? String(s.driftMinutes ?? 3) : String(s.laps);
     dmgSel.value = s.damage;
     const humans = room.humans.length;
     const maxBots = MAX_GRID - humans;
@@ -315,7 +320,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
     const forcedCar = myCar().forced ? myCar().spec : null;
     const carOf = (p: Room['players'][number]) => (forcedCar ?? carSpec(p.cars?.[s.series], s.series)).name;
     const rows = room.players.map((p) => `<li><span class="num" style="background:${esc(p.color)}">${p.number}</span><span class="pname"><span>${esc(p.nickname)}${p.slot === room.selfSlot ? ' <small>(you)</small>' : ''}</span><small class="pcar">${esc(carOf(p))}</small></span><span class="tagline">${p.isHost ? 'Host' : p.ready ? '<span style="color:#3ad17a">Ready</span>' : 'Not ready'}${online && !p.isHost ? ` · ${p.ping} ms` : ''}</span></li>`);
-    const bots = Math.min(s.bots, maxBots);
+    const bots = drift ? 0 : Math.min(s.bots, maxBots);
     for (let i = 0; i < bots; i++) rows.push(`<li><span class="num" style="background:#555">AI</span>${BOT_NAMES[i % BOT_NAMES.length]}<span class="tagline">AI driver</span></li>`);
     if (online) for (let i = humans; i < MAX_HUMANS; i++) rows.push('<li class="empty">Open player slot</li>');
     $('#players')!.innerHTML = rows.join('');
@@ -327,7 +332,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
     if (startBtn) {
       const waiting = room.humans.filter((p) => !p.isHost && !p.ready).length;
       startBtn.disabled = waiting > 0;
-      $('#hint')!.textContent = waiting > 0 ? `Waiting for ${waiting} driver(s) to get ready…` : online && humans === 1 ? 'Share the code above, or start now and race the AI.' : '';
+      $('#hint')!.textContent = waiting > 0 ? `Waiting for ${waiting} driver(s) to get ready…` : online && humans === 1 ? (drift ? 'Share the code above, or start now and drift on your own.' : 'Share the code above, or start now and race the AI.') : '';
     }
     const readyBtn = $<HTMLButtonElement>('#ready');
     if (readyBtn) {
@@ -340,7 +345,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
   render();
   room.onLobby = render;
 
-  lapsSel.addEventListener('change', () => room.setSettings({ laps: Number(lapsSel.value) }));
+  lapsSel.addEventListener('change', () => room.setSettings(drift ? { driftMinutes: Number(lapsSel.value) } : { laps: Number(lapsSel.value) }));
   root.querySelector<HTMLInputElement>('#anytrack')?.addEventListener('change', (e) => { room.setSettings({ anyTrack: (e.target as HTMLInputElement).checked }); render(); });
   dmgSel.addEventListener('change', () => room.setSettings({ damage: dmgSel.value as Room['settings']['damage'] }));
   botsSel.addEventListener('change', () => { room.setSettings({ bots: Number(botsSel.value) }); render(); });
@@ -401,6 +406,25 @@ export function resultsScreen(rows: ResultRow[], grid: GridEntry[], isHost: bool
           const g = name(r.slot);
           return `<tr><td>${r.pos}</td><td><span class="num" style="background:${esc(g?.color ?? '#555')}">${g?.number ?? ''}</span></td><td>${esc(g?.nickname ?? '?')}${g?.bot ? ' <small>AI</small>' : ''}</td><td>${r.laps}</td><td>${fmtTime(r.best)}</td><td>${r.status === 1 ? fmtTime(r.total + (r.pen ?? 0)) : '—'}</td><td>${r.pen ? `+${r.pen}s` : ''}</td><td>${r.status === 1 ? 'Finished' : r.status === 2 ? 'DNF' : 'Running'}</td></tr>`;
         }).join('')}
+      </table></div>
+      <div class="row" style="margin-top:16px">
+        <button class="btn ghost" id="leave">Leave</button>
+        ${isHost ? '<button class="btn" id="lobby">Back to lobby</button>' : '<div class="note" style="align-self:center">Waiting for the host…</div>'}
+      </div>
+    </div>`);
+  root.querySelector('#leave')!.addEventListener('click', h.leave);
+  root.querySelector('#lobby')?.addEventListener('click', h.lobby);
+}
+
+/** Drift session results: ranked by drift score, with each driver's best single combo. */
+export function driftResultsScreen(rows: { slot: number; name: string; car: string; color: string; number: number; score: number; best: number }[], selfSlot: number, isHost: boolean, h: { lobby(): void; leave(): void }) {
+  const root = mount(`
+    <div class="card wide drift-results">
+      <h2>🌀 Drift results</h2>
+      ${rows[0] ? `<p class="tag">🏆 Drift king: <b>${esc(rows[0].name)}</b> · ${rows[0].score.toLocaleString()} points</p>` : ''}
+      <div class="results-wrap"><table class="results">
+        <tr><th>Pos</th><th>Car</th><th>Driver</th><th>Model</th><th>Score</th><th>Best combo</th></tr>
+        ${rows.map((r, i) => `<tr${r.slot === selfSlot ? ' class="me"' : ''}><td>${i + 1}</td><td><span class="num" style="background:${esc(r.color)}">${r.number}</span></td><td>${esc(r.name)}</td><td>${esc(r.car)}</td><td><b>${r.score.toLocaleString()}</b></td><td>${r.best.toLocaleString()}</td></tr>`).join('')}
       </table></div>
       <div class="row" style="margin-top:16px">
         <button class="btn ghost" id="leave">Leave</button>

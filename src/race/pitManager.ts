@@ -6,13 +6,12 @@ import type { BotDriver } from '../vehicle/bot';
 import { COMPOUNDS, DRY_COMPOUNDS, type Compound } from '../vehicle/tyres';
 import { PitCrew } from '../render/pitCrew';
 import { PIT_LIMIT, pitApproach, boxIndex, botWantsPit, damageWork, defaultPlan, inPitLane, pitTime, within, type PitInfo, type PitPlan } from './pits';
-import type { Series } from '../vehicle/catalog';
 
 /** What the pit logic needs from the session. */
 export interface PitHost {
   readonly isHost: boolean;
   readonly self: number;
-  readonly series: Series;
+  readonly series: 'stock' | 'gp';
   readonly rain: boolean;
   readonly laps: number;
   readonly scene: THREE.Object3D;

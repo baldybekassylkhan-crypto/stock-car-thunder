@@ -8,7 +8,7 @@ import type { PartName } from './carModel';
  * Local frame (physics body): +Z forward, +X left, +Y up, origin at the centre of mass;
  * the ground is at y = -geo.comHeight.
  */
-export type Series = 'stock' | 'gp';
+export type Series = 'stock' | 'gp' | 'drift';
 export type BodyKind = 'stock' | 'openWheel';
 
 export interface CarGeometry {
@@ -86,6 +86,11 @@ export interface CarSpec {
   ers: { power: number; capacity: number } | null;
 
   damage: DamageProfile;
+  /**
+   * Drift car: rear tyres have less grip than the fronts (`rearGrip`), no traction control, and
+   * a drift assist (0..1) that countersteers for you and stops the car from spinning round.
+   */
+  drift?: { rearGrip: number; assist: number };
   /** Demolition-arena kit on a stock body (bumper bars, cage, armour plates). */
   kit?: { cls: string; bumper: string };
 }
@@ -196,6 +201,45 @@ const GP_BASE = {
   damage: DAMAGE_PROFILES.openWheel,
 };
 
+// ------------------------------------------------------------------ drift cars
+/**
+ * Light rear-drive coupes on a stock-car chassis: grippy fronts, looser rears, big steering lock,
+ * a handbrake, no traction control, and the drift assist (see Car.step).
+ */
+const DRIFT_BASE = {
+  ...STOCK_BASE,
+  series: 'drift' as const,
+  mass: 1240,
+  inertia: { x: 2600, y: 2500, z: 800 },
+  springK: [62000, 56000] as [number, number],
+  damperC: [5200, 4800] as [number, number],
+  antiRoll: [24000, 12000] as [number, number],
+  mu: 1.2,
+  pacejka: { B: 9, C: 1.35 },
+  brakeForce: 7200,
+  brakeBias: 0.6,
+  steerLock: [0.85, 0.42] as [number, number],
+  torque: [[1000, 260], [2500, 380], [4000, 470], [5500, 500], [6800, 480], [7600, 430], [8000, 380]] as [number, number][],
+  idle: 950,
+  redline: 7900,
+  shiftUpRpm: 7500,
+  shiftDownRpm: 4200,
+  gears: [3.4, 2.3, 1.7, 1.3, 1.05, 0.88],
+  reverse: 3.3,
+  finalDrive: 4.1,
+  cylinders: 6,
+  dragCdA: 0.75,
+  liftClA: 0.25,
+  aeroFront: 0.5,
+  roofFlaps: false,
+  fuelTank: 50,
+  fuelBurn: 0.2,
+  tyreWear: 0.6,
+  tyreStartTemp: 60,
+  wakeLoss: 0,
+  drift: { rearGrip: 0.84, assist: 0.75 },
+};
+
 export const CARS: CarSpec[] = [
   {
     ...STOCK_BASE,
@@ -272,10 +316,46 @@ export const CARS: CarSpec[] = [
     fuelBurn: 0.5,
     tyreWear: 1.08,
   },
+  {
+    ...DRIFT_BASE,
+    id: 'drift-ronin',
+    name: 'Ronin S-14',
+    maker: 'Ronin',
+    archetype: 'Balanced',
+    blurb: 'The easy one: smooth power, predictable slides, holds a long drift without fuss.',
+  },
+  {
+    ...DRIFT_BASE,
+    id: 'drift-kaze',
+    name: 'Kaze RX-8R',
+    maker: 'Kaze',
+    archetype: 'Light & quick',
+    blurb: 'Light and high-revving: flicks into a drift instantly and changes direction in a blink.',
+    mass: 1150,
+    inertia: { x: 2400, y: 2150, z: 740 },
+    torque: scaleTorque(DRIFT_BASE.torque, (r) => (r < 4000 ? 0.82 : r < 7000 ? 0.98 : 1.12)),
+    redline: 8800,
+    shiftUpRpm: 8500,
+    drift: { rearGrip: 0.82, assist: 0.72 },
+  },
+  {
+    ...DRIFT_BASE,
+    id: 'drift-brute',
+    name: 'Brute V8',
+    maker: 'Brute',
+    archetype: 'Torque monster',
+    blurb: 'A big V8 in a light shell: endless smoke and wide, fast drifts. Needs a gentle right foot.',
+    mass: 1360,
+    inertia: { x: 2800, y: 2750, z: 860 },
+    torque: scaleTorque(DRIFT_BASE.torque, (r) => (r < 3500 ? 1.45 : r < 6000 ? 1.3 : 1.15)),
+    cylinders: 8,
+    gears: [3.1, 2.1, 1.55, 1.2, 1.0, 0.84],
+    drift: { rearGrip: 0.86, assist: 0.78 },
+  },
 ];
 
-export const DEFAULT_CAR: Record<Series, string> = { stock: 'stock-balanced', gp: 'gp-balanced' };
-export const SERIES_LABEL: Record<Series, string> = { stock: 'Stock Car', gp: 'Open-Wheel GP' };
+export const DEFAULT_CAR: Record<Series, string> = { stock: 'stock-balanced', gp: 'gp-balanced', drift: 'drift-ronin' };
+export const SERIES_LABEL: Record<Series, string> = { stock: 'Stock Car', gp: 'Open-Wheel GP', drift: 'Drift' };
 
 export function carSpec(id: string | undefined, series?: Series): CarSpec {
   const c = CARS.find((x) => x.id === id && (!series || x.series === series));
