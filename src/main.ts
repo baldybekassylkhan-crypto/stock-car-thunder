@@ -25,8 +25,7 @@ let arena: ArenaSession | null = null;
 let room: Room | null = null;
 const roomParam = new URLSearchParams(location.search).get('room') ?? undefined;
 
-const DEFAULT_SETTINGS = (): RoomSettings => ({ map: 'sunvale', laps: 10, damage: 'realistic', bots: 5, weather: 'dry', series: 'stock', sameCar: '', mode: 'race' });
-const ARENA_SETTINGS = (): RoomSettings => ({ ...DEFAULT_SETTINGS(), mode: 'arena', arena: { bots: 7, events: 'off', timeLimit: 0 } });
+const DEFAULT_SETTINGS = (): RoomSettings => ({ map: 'sunvale', laps: 10, damage: 'realistic', bots: 5, weather: 'dry', series: 'stock', sameCar: '', mode: 'race', arena: { bots: 7, events: 'off', timeLimit: 0 } });
 const BOT_COLORS = [
   '#2b7de9', '#e9472b', '#14b48c', '#f0a020', '#9b3de0', '#e0e0e0', '#1a1a1a', '#e83e8c', '#5bc0eb', '#8bc34a',
   '#ff7f11', '#0b3d91', '#c81d25', '#2ec4b6', '#ffd23f', '#6a4c93', '#3a3a3a', '#f15bb5', '#00bbf9', '#9ef01a',
@@ -97,14 +96,26 @@ function endToLobby(r: Room) {
   showLobby();
 }
 
+/** The room's one lobby: the host picks racing or the Demolition Arena in it. */
 function showLobby() {
   if (!room) return;
   const r = room;
-  if (r.settings.mode === 'arena') {
-    arenaLobbyScreen(r, { leave: () => leaveRoom(), start: () => startArenaMatch() });
-    return;
-  }
+  const mode = r.settings.mode ?? 'race';
+  const setMode = (m: 'race' | 'arena') => {
+    r.setSettings({ mode: m, arena: r.settings.arena ?? { bots: 7, events: 'off', timeLimit: 0 } });
+    showLobby();
+  };
+  r.onLobby = () => {}; // the previous lobby's listener must not fire while the new one is built
+  if (mode === 'arena') arenaLobbyScreen(r, { leave: () => leaveRoom(), start: () => startArenaMatch(), mode: setMode });
+  else showRaceLobby(r, setMode);
+  // clients: when the host switches the mode, show the other lobby
+  const render = r.onLobby;
+  r.onLobby = () => { if ((r.settings.mode ?? 'race') !== mode) showLobby(); else render(); };
+}
+
+function showRaceLobby(r: Room, setMode: (m: 'race' | 'arena') => void) {
   lobbyScreen(r, {
+    mode: setMode,
     leave: () => leaveRoom(),
     start: () => {
       const grid = buildGrid(r);
@@ -268,28 +279,7 @@ async function hostRoom(settingsFor: () => RoomSettings) {
 }
 
 const nav: Nav = {
-  arenaSingle() {
-    const r = Room.offline(profile, ARENA_SETTINGS());
-    wireRoom(r);
-    showLobby();
-  },
-  arenaHost() { void hostRoom(ARENA_SETTINGS); },
-  async host() {
-    loadingScreen('Creating room…');
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        const r = await Room.host(profile, makeRoomCode(), DEFAULT_SETTINGS());
-        wireRoom(r);
-        showLobby();
-        return;
-      } catch (e) {
-        if ((e as { code?: string }).code === 'taken') continue;
-        messageScreen('Could not create a room', (e as Error).message, () => mainMenu(nav));
-        return;
-      }
-    }
-    messageScreen('Could not create a room', 'Please try again.', () => mainMenu(nav));
-  },
+  host() { void hostRoom(DEFAULT_SETTINGS); },
   async join(code: string) {
     const r = await Room.join(profile, code);
     history.replaceState(null, '', `${location.pathname}?room=${code}`);

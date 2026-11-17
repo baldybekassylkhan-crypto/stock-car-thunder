@@ -6,7 +6,7 @@ import { EVENT_IDS, EVENT_INFO } from '../arena/events';
 import { ARENA_PAINTS, VICTORY_EFFECTS, levelOf, xpForLevel, loadArenaProfile, saveArenaProfile, type Reward } from '../arena/rewards';
 import type { ArenaResult } from '../arena/arenaSession';
 import { CarPreview } from './carPreview';
-import { esc, mountScreen, onScreenLeave } from './screens';
+import { esc, mountScreen, onScreenLeave, modeTabs, wireModeTabs } from './screens';
 
 /** Most cars in one arena match (humans + AI). */
 export const ARENA_MAX = 16;
@@ -14,6 +14,8 @@ export const ARENA_MAX = 16;
 export interface ArenaLobbyHandlers {
   start(): void;
   leave(): void;
+  /** Host switched the room's mode (race / arena). */
+  mode?(m: 'race' | 'arena'): void;
 }
 
 /** What a level unlocks (for the results screen). */
@@ -45,7 +47,8 @@ export function arenaLobbyScreen(room: Room, h: ArenaLobbyHandlers) {
   const nextXp = xpForLevel(level + 1), prevXp = xpForLevel(level);
   const root = mountScreen(`
     <div class="card wide lobby arena-lobby">
-      <h2>💥 ${online ? (room.isHost ? 'Your arena' : 'Arena lobby') : 'Demolition Arena'}</h2>
+      <h2>${online ? (room.isHost ? 'Your room' : 'Room lobby') : 'Play solo'}</h2>
+      ${modeTabs(room)}
       ${online ? `
       <div class="room-code">
         <div><label>Room code</label><div class="code">${room.code}</div></div>
@@ -92,6 +95,7 @@ export function arenaLobbyScreen(room: Room, h: ArenaLobbyHandlers) {
       <div class="note" id="hint" style="margin-top:8px"></div>
     </div>`);
   const $ = <T extends HTMLElement>(s: string) => root.querySelector<T>(s)!;
+  wireModeTabs(root, room, h.mode);
   const preview = new CarPreview($<HTMLCanvasElement>('#carview'));
   onScreenLeave(() => preview.dispose());
   const botsSel = $<HTMLSelectElement>('#bots'), timeSel = $<HTMLSelectElement>('#time'), evSel = $<HTMLSelectElement>('#events');

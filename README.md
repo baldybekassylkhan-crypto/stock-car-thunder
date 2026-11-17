@@ -72,7 +72,8 @@ Gamepad: left stick steers, RT/LT are throttle/brake, LB/RB shift, A opens the d
 
 1. One player clicks **Host room**. They get a 6-character code (and a shareable link).
 2. Friends click **Join room** and type the code, or just open the link.
-3. Everyone presses **Ready**, then the host picks the track, laps, damage level, AI drivers and weather and clicks **Start race**.
+3. The host picks the mode at the top of the lobby: **🏁 Race** or **💥 Demolition Arena**. Everyone's lobby switches with it, so one room plays both (no separate arena room).
+4. Everyone presses **Ready**, then the host sets up the race (track, laps, damage, AI, weather) or the arena (AI wreckers, events, time limit) and clicks **Start**.
 
 Anyone who opens the code or link while a race or arena match is running joins as a **spectator**: they watch the cars (Space or C switches to the next car) and drive in the next race.
 
@@ -164,7 +165,7 @@ GP circuits appear in the lobby when the series is Open-Wheel GP; tick **any tra
 
 ## Demolition Arena
 
-A separate mode from the main menu (single player or online room with a code and link). Up to 16 cars in a walled dirt arena; the last car running wins.
+Picked in the room lobby (Host room, Join room or Play solo), next to racing. Up to 16 cars in a walled dirt arena; the last car running wins.
 
 - **Classes:** Balanced, Speed Demon, Heavy Tanker, Rammer and Survivor (the last two unlock with levels), each with its own speed, mass, armour and ramming power.
 - **Damage:** 1000 HP, armour per side that wears down, and five damage stages that cost power, steering and grip. Hitting with your own nose is safest; getting T-boned hurts most.

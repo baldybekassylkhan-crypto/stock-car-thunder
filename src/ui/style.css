@@ -266,7 +266,6 @@ input.code { font-family: var(--font-display); font-size: 34px; letter-spacing: 
 .ah-hint { position: absolute; left: 20px; bottom: 8px; font: 12px var(--font-body); color: var(--muted); }
 @media (max-width: 700px) { .ah-stat { min-width: 64px; } .ah-stat b { font-size: 20px; } .ah-feed { display: none; } .ah-ab { width: 64px; } .ah-bl { width: 240px; } }
 
-.menu-tile.arena-tile { grid-column: 1 / -1; border-color: rgba(255, 90, 40, 0.6); background: linear-gradient(90deg, rgba(232, 53, 44, 0.22), rgba(255, 204, 0, 0.1)); }
 .arena-level { display: flex; align-items: center; gap: 10px; margin: -4px 0 12px; font-size: 13px; color: var(--muted); }
 .arena-level > b { color: var(--accent); font: 800 18px var(--font-display); }
 .arena-level i { flex: 1; max-width: 220px; height: 7px; background: rgba(255, 255, 255, 0.1); border-radius: 4px; overflow: hidden; }
@@ -287,3 +286,13 @@ input.code { font-family: var(--font-display); font-size: 34px; letter-spacing: 
 
 .anytrack { float: right; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
 .anytrack input { vertical-align: middle; margin: 0 2px 0 0; }
+
+/* lobby mode switch: racing or the Demolition Arena, picked by the host */
+.mode-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; }
+.mode-tab { flex: 1 1 180px; padding: 12px 16px; border-radius: 12px; border: 2px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.04); color: inherit; font: 700 18px var(--font-display); letter-spacing: 0.5px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.mode-tab:hover:not(:disabled) { border-color: rgba(255, 204, 0, 0.6); }
+.mode-tab.active { border-color: var(--accent); background: rgba(255, 204, 0, 0.14); color: var(--accent); }
+.mode-tab[data-mode="arena"].active { border-color: #ff5a28; background: rgba(232, 53, 44, 0.18); color: #ff8a5c; }
+.mode-tab:disabled { cursor: default; opacity: 0.75; }
+.mode-tab:disabled.active { opacity: 1; }
+.mode-tabs .note { flex-basis: 100%; margin: 0; }

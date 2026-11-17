@@ -48,9 +48,6 @@ export interface Nav {
   host(): void;
   join(code: string): Promise<void>;
   single(): void;
-  /** Demolition Arena: play against the AI, or host an online arena. */
-  arenaSingle(): void;
-  arenaHost(): void;
 }
 
 // ---------------- nickname ----------------
@@ -90,11 +87,10 @@ export function mainMenu(nav: Nav, prefillCode?: string, notice?: string) {
       <div class="who">Driving as <b>${esc(profile.nickname)}</b> · #${profile.carNumber}<a id="rename">change</a></div>
       ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
       <div class="menu-grid">
-        <button class="menu-tile" id="host"><b>Host room</b><span>Get a 6-letter code and share it with up to ${MAX_HUMANS - 1} friends.</span></button>
+        <button class="menu-tile" id="host"><b>Host room</b><span>Get a 6-letter code and a link for up to ${MAX_HUMANS - 1} friends. Pick racing or the Demolition Arena in the lobby.</span></button>
         <button class="menu-tile" id="join"><b>Join room</b><span>Enter a friend's room code.</span></button>
-        <button class="menu-tile" id="single"><b>Single race</b><span>Race AI drivers, or free practice on any track.</span></button>
+        <button class="menu-tile" id="single"><b>Play solo</b><span>Race AI drivers, free practice, or the 💥 Demolition Arena against AI wreckers.</span></button>
         <button class="menu-tile" id="garage"><b>Garage &amp; settings</b><span>Car number, colour, graphics, assists.</span></button>
-        <button class="menu-tile arena-tile" id="arena"><b>💥 Demolition Arena</b><span>Last car standing wins. Ram, smash and outlast up to 15 opponents.</span></button>
       </div>
     </div>`);
   root.querySelector('#rename')!.addEventListener('click', () => nicknameScreen(() => mainMenu(nav)));
@@ -102,26 +98,24 @@ export function mainMenu(nav: Nav, prefillCode?: string, notice?: string) {
   root.querySelector('#join')!.addEventListener('click', () => joinScreen(nav));
   root.querySelector('#single')!.addEventListener('click', () => nav.single());
   root.querySelector('#garage')!.addEventListener('click', () => garageScreen(() => mainMenu(nav)));
-  root.querySelector('#arena')!.addEventListener('click', () => arenaMenu(nav));
 }
 
-/** Demolition Arena entry: play the AI, host an online arena (code + link), or join one. */
-export function arenaMenu(nav: Nav) {
-  const root = mount(`
-    <div class="card wide">
-      <h1 class="logo">Demolition <span>Arena</span></h1>
-      <p class="note">Smash, ram and outlast everyone in a floodlit arena. The last car still running wins.</p>
-      <div class="menu-grid">
-        <button class="menu-tile" id="asingle"><b>Play vs AI</b><span>You against up to 15 AI wreckers.</span></button>
-        <button class="menu-tile" id="ahost"><b>Host online arena</b><span>Get a code and a link for up to ${MAX_HUMANS - 1} friends, fill up with AI.</span></button>
-        <button class="menu-tile" id="ajoin"><b>Join with a code</b><span>Enter a friend's room code (or open their link).</span></button>
-        <button class="menu-tile" id="aback"><b>Back</b><span>Main menu.</span></button>
-      </div>
-    </div>`);
-  root.querySelector('#asingle')!.addEventListener('click', () => nav.arenaSingle());
-  root.querySelector('#ahost')!.addEventListener('click', () => nav.arenaHost());
-  root.querySelector('#ajoin')!.addEventListener('click', () => joinScreen(nav));
-  root.querySelector('#aback')!.addEventListener('click', () => mainMenu(nav));
+/**
+ * Mode switch shown at the top of the lobby (racing or the Demolition Arena). One room, one lobby:
+ * the host picks the mode here and everyone's lobby switches with it.
+ */
+export function modeTabs(room: Room) {
+  const mode = room.settings.mode ?? 'race';
+  const tab = (m: 'race' | 'arena', label: string) => `<button class="mode-tab${mode === m ? ' active' : ''}" data-mode="${m}"${room.isHost ? '' : ' disabled'}>${label}</button>`;
+  return `<div class="mode-tabs">${tab('race', '🏁 Race')}${tab('arena', '💥 Demolition Arena')}${room.isHost ? '' : '<span class="note">The host picks the mode</span>'}</div>`;
+}
+
+/** Wire the mode tabs of a lobby screen. */
+export function wireModeTabs(root: HTMLElement, room: Room, onMode?: (m: 'race' | 'arena') => void) {
+  root.querySelectorAll<HTMLButtonElement>('.mode-tab').forEach((b) => b.addEventListener('click', () => {
+    const m = b.dataset.mode as 'race' | 'arena';
+    if (room.isHost && m !== (room.settings.mode ?? 'race')) onMode?.(m);
+  }));
 }
 
 export function messageScreen(title: string, text: string, onOk: () => void) {
@@ -172,6 +166,8 @@ export function joinScreen(nav: Nav, prefill = '') {
 export interface LobbyHandlers {
   start(): void;
   leave(): void;
+  /** Host switched the room's mode (race / arena). */
+  mode?(m: 'race' | 'arena'): void;
 }
 
 export function lobbyScreen(room: Room, h: LobbyHandlers) {
@@ -179,7 +175,8 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
   const link = `${location.origin}${location.pathname}?room=${room.code}`;
   const root = mount(`
     <div class="card wide lobby">
-      <h2>${online ? (room.isHost ? 'Your room' : 'Room lobby') : 'Single race'}</h2>
+      <h2>${online ? (room.isHost ? 'Your room' : 'Room lobby') : 'Play solo'}</h2>
+      ${modeTabs(room)}
       ${online ? `
       <div class="room-code">
         <div><label>Room code</label><div class="code">${room.code}</div></div>
@@ -233,6 +230,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
       <div class="note" id="hint" style="margin-top:8px"></div>
     </div>`);
   const $ = <T extends HTMLElement>(s: string) => root.querySelector<T>(s);
+  wireModeTabs(root, room, h.mode);
   const selects = ['laps', 'dmg', 'bots', 'weather', 'series', 'samecar'].map((id) => $<HTMLSelectElement>(`#${id}`)!);
   const [lapsSel, dmgSel, botsSel, weatherSel, seriesSel, sameSel] = selects;
   if (!room.isHost) selects.forEach((s) => (s.disabled = true));
