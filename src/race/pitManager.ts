@@ -65,9 +65,65 @@ export class PitManager {
   private used = new Map<number, Set<Compound>>();
   playerPlan: PlayerPlan = { tyre: null, fuel: 'full', repair: 'auto', wing: false };
   menuOpen = false;
+  /** Repair bays (one per stall): the player parks in any free one to be serviced. */
+  private bays: { i: number; mesh: THREE.Mesh; taken: boolean }[] = [];
+  private bayGroup = new THREE.Group();
+  private bayMats: { free: THREE.MeshBasicMaterial; taken: THREE.MeshBasicMaterial; mine: THREE.MeshBasicMaterial };
+  private warnT = 0;
+  /** The bay the player is parked in (index), -1 when none. */
+  private myBay = -1;
 
   constructor(private track: Track, readonly info: PitInfo, private host: PitHost) {
     this.limit = PIT_LIMIT[host.series];
+    const tex = bayTexture();
+    const mk = (c: number) => new THREE.MeshBasicMaterial({ map: tex, color: c, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+    this.bayMats = { free: mk(0x3ad17a), taken: mk(0xef4444), mine: mk(0xfacc15) };
+    const span = ((info.limitTo - info.boxFrom) % track.n + track.n) % track.n;
+    const count = Math.min(40, Math.max(1, Math.floor(span / info.boxSpacing)));
+    const len = info.boxSpacing * track.ds * 0.82;
+    for (let k = 0; k < count; k++) {
+      const i = boxIndex(track, info, k);
+      const geo = new THREE.PlaneGeometry(3.4, len);
+      geo.rotateX(-Math.PI / 2);
+      const mesh = new THREE.Mesh(geo, this.bayMats.free);
+      mesh.position.copy(track.surface(i, info.box)).addScaledVector(track.N[i], 0.035);
+      mesh.rotation.y = Math.atan2(track.T[i].x, track.T[i].z);
+      mesh.renderOrder = 2;
+      this.bayGroup.add(mesh);
+      this.bays.push({ i, mesh, taken: false });
+    }
+    host.scene.add(this.bayGroup);
+  }
+
+  /** Which bay a position is inside (-1: none). */
+  private bayAt(idx: number, lat: number) {
+    if (Math.abs(lat - this.info.box) > 1.9) return -1;
+    const half = (this.info.boxSpacing * this.track.ds * 0.82) / 2;
+    for (let k = 0; k < this.bays.length; k++) {
+      const d = this.ahead(this.bays[k].i, idx);
+      const along = d > this.track.length / 2 ? d - this.track.length : d;
+      if (Math.abs(along) < half) return k;
+    }
+    return -1;
+  }
+
+  /** Mark bays with a car in them (every car: local, AI and remote). */
+  private updateBays() {
+    for (const b of this.bays) b.taken = false;
+    for (const slot of this.host.order) {
+      const p = this.host.posOf(slot);
+      const i = this.track.nearest(p, this.st.get(slot)?.idx ?? -1, 40);
+      const k = this.bayAt(i, this.track.lateral(p, i));
+      if (k >= 0 && slot !== this.host.self) this.bays[k].taken = true;
+    }
+    this.bays.forEach((b, k) => { b.mesh.material = k === this.myBay ? this.bayMats.mine : b.taken ? this.bayMats.taken : this.bayMats.free; });
+  }
+
+  /** Status line for the player in the pit lane. */
+  playerHint(): string | null {
+    const ph = this.phaseOf(this.host.self);
+    if (ph === 'lane') return this.warnT > 0 ? 'THAT BAY IS TAKEN — FIND A FREE GREEN ONE' : 'PIT LANE — PARK IN A FREE GREEN BAY TO BE REPAIRED';
+    return null;
   }
 
   /** Host: remember the starting compound of every car. */
@@ -117,7 +173,9 @@ export class PitManager {
     const pp = this.playerPlan;
     if (pp.tyre) base.tyre = pp.tyre;
     if (car.spec.series !== 'gp') base.fuel = pp.fuel === 'none' ? 0 : Math.max(0, car.spec.fuelTank * (pp.fuel === 'half' ? 0.5 : 1) - car.fuel);
-    if (pp.repair !== 'auto') base.repair = pp.repair === 'yes';
+    // automatic: any damage at all gets fixed when you stop in a repair bay
+    if (pp.repair === 'auto') base.repair = damageWork(car) > 0.01 || base.repair;
+    else base.repair = pp.repair === 'yes';
     if (car.spec.series === 'gp') base.wing = pp.wing || base.wing;
     return base;
   }
@@ -157,6 +215,8 @@ export class PitManager {
   /** Run the pit logic for the cars this peer simulates. */
   update(dt: number, slots: number[]) {
     this.time += dt;
+    this.warnT -= dt;
+    this.updateBays();
     for (const slot of slots) {
       const car = this.host.carOf(slot);
       if (!car || car.damage.destroyed) continue;
@@ -218,11 +278,22 @@ export class PitManager {
         // went through without stopping (too fast at the stall): back to racing
         s.phase = 'none'; s.plan = null; if (bot) bot.pit = null;
       }
-      if (s.phase === 'lane') {
+      if (s.phase === 'lane' && slot === this.host.self) {
+        // the player parks in a free repair bay of their choice: service starts once the car stands still in it
+        const k = this.bayAt(s.idx, lat);
+        if (k >= 0 && speed < 1.2) {
+          if (this.bays[k].taken) { if (this.warnT <= 0) this.warnT = 2; }
+          else {
+            this.myBay = k;
+            s.phase = 'stopping';
+            s.plan = this.planForPlayer(car);
+          }
+        }
+      } else if (s.phase === 'lane') {
         const past = this.ahead(box, s.idx);
         if (past < 6 && speed < this.limit + 4) {
           s.phase = 'stopping';
-          if (!s.plan) s.plan = slot === this.host.self ? this.planForPlayer(car) : defaultPlan(car, this.host.rain);
+          if (!s.plan) s.plan = defaultPlan(car, this.host.rain);
         }
       }
       if (s.phase === 'stopping' && speed < 0.6) {
@@ -275,6 +346,7 @@ export class PitManager {
       repair = plan.repair ? 'full' : 'wing';
     }
     this.host.send('pitdone', { s: slot, repair });
+    if (slot === this.host.self) this.myBay = -1;
     s.phase = 'leaving';
     s.limitT = 0;
     if (slot === this.host.self) this.host.flash('GO GO GO!', 1.2, '#3ad17a');
@@ -339,5 +411,38 @@ export class PitManager {
   dispose() {
     for (const c of this.crews.values()) { c.crew.group.removeFromParent(); c.crew.dispose(); }
     this.crews.clear();
+    this.bayGroup.removeFromParent();
   }
+}
+
+/** Painted repair bay: a thick outline, a wrench and "REPAIR" (tinted green / red / yellow). */
+let bayTex: THREE.CanvasTexture | null = null;
+function bayTexture() {
+  if (bayTex) return bayTex;
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 512;
+  const g = c.getContext('2d')!;
+  g.fillStyle = 'rgba(255,255,255,0.10)';
+  g.fillRect(0, 0, 256, 512);
+  g.strokeStyle = '#ffffff';
+  g.lineWidth = 18;
+  g.strokeRect(9, 9, 238, 494);
+  // diagonal hatching at both ends
+  g.lineWidth = 8;
+  g.globalAlpha = 0.6;
+  for (let k = -2; k < 6; k++) { g.beginPath(); g.moveTo(k * 50, 18); g.lineTo(k * 50 + 60, 78); g.stroke(); g.beginPath(); g.moveTo(k * 50, 434); g.lineTo(k * 50 + 60, 494); g.stroke(); }
+  g.globalAlpha = 1;
+  g.fillStyle = '#ffffff';
+  g.font = '900 60px "Barlow Condensed", "Arial Narrow", sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.save();
+  g.translate(128, 256);
+  g.rotate(-Math.PI / 2);
+  g.fillText('🔧 REPAIR', 0, 0);
+  g.restore();
+  bayTex = new THREE.CanvasTexture(c);
+  bayTex.colorSpace = THREE.SRGBColorSpace;
+  bayTex.anisotropy = 4;
+  return bayTex;
 }

@@ -23,6 +23,7 @@ import { settings } from './profile';
 import { encodeState, decodeState } from '../net/codec';
 import { addTrackDetail } from '../tracks/detail';
 import { DriftScorer, DriftHud } from '../race/drift';
+import { NameTags, WatchBanner } from '../render/nameTags';
 import { RaceDirector, easeLimit, type RaceSnapshot, type ResultRow } from '../race/race';
 import { PART_NAMES, type PartName, type CarVisual } from '../vehicle/carModel';
 import type { LoadedMap, MapDef } from '../tracks/maps';
@@ -112,6 +113,8 @@ export class Session {
   private driftEnded = false;
   private driftSendT = 0;
   private prevSpeed = 0;
+  private tags = new NameTags();
+  private watch: WatchBanner;
   private scrapeLevel = 0;
   private spotter = '';
   private spotterUntil = 0;
@@ -142,6 +145,7 @@ export class Session {
   ) {
     this.hud = new Hud(hudRoot);
     this.hud.show(false);
+    this.watch = new WatchBanner(hudRoot);
     this.drift = cfg.mode === 'drift';
     if (this.drift) {
       this.driftHud = new DriftHud(hudRoot);
@@ -900,7 +904,23 @@ export class Session {
     this.updateSpotter();
     this.racingLine?.update(this.progress.index);
     this.updateDrift(dt, interactive);
-    if (interactive) this.updateHud(tm);
+    if (interactive) {
+      this.updateTags();
+      this.updateHud(tm);
+    }
+  }
+
+  /** Nicknames over every other car, and the "watching" banner while spectating. */
+  private updateTags() {
+    const cars = [];
+    for (const g of this.grid) {
+      if (g.slot === this.self) continue;
+      const v = this.visualOf(g.slot);
+      if (v) cars.push({ slot: g.slot, root: v.root, name: g.nickname, color: g.color, number: g.number });
+    }
+    this.tags.sync(cars, this.r.camera, this.spectating);
+    const w = this.spectating >= 0 ? this.entry(this.spectating) : null;
+    this.watch.set(w ? w.nickname : null, w?.color, w?.number);
   }
 
   /** Drift mode: scoring, the session clock, sharing scores, and the end of the session. */
@@ -1184,6 +1204,7 @@ export class Session {
     else if (this.race.phase === 'caution') status = this.race.sc === 'vsc' ? 'VIRTUAL SAFETY CAR — KEEP TO THE LIMIT' : this.race.sc === 'sc' ? 'SAFETY CAR — NO OVERTAKING' : 'CAUTION — SLOW DOWN';
     else if (this.pits && this.pits.phaseOf(this.self) === 'service') status = `PIT STOP — ${Math.max(0, this.pits.timerOf(this.self)).toFixed(1)} s`;
     else if (this.pits && (this.pits.phaseOf(this.self) === 'stopping' || this.pits.phaseOf(this.self) === 'waiting')) status = 'PIT STOP — CREW READY';
+    else if (this.pits?.playerHint()) status = this.pits.playerHint()!;
     else if (this.pits && this.pits.speedCap(this.self) < Infinity) status = `PIT LIMITER ${Math.round(this.pits.limit * (settings.units === 'mph' ? 2.237 : 3.6))} ${settings.units === 'mph' ? 'MPH' : 'KM/H'}`;
     else if (this.localYellow) status = 'YELLOW FLAG — CRASH AHEAD, SLOW DOWN, NO OVERTAKING';
     else if (this.car.fuel <= 0) status = 'OUT OF FUEL';
@@ -1238,6 +1259,8 @@ export class Session {
     this.audio?.dispose();
     this.hud.show(false);
     this.driftHud?.dispose();
+    this.tags.dispose();
+    this.watch.dispose();
     if (this.map) this.r.scene.remove(this.map.group);
     if (this.racingLine) { this.r.scene.remove(this.racingLine.mesh); this.racingLine.dispose(); }
     this.pits?.dispose();

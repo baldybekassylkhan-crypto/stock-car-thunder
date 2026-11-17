@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { NameTags, WatchBanner } from '../render/nameTags';
 import { initPhysics, PhysicsWorld, RAPIER, RAY_TRACK_ONLY } from '../physics/world';
 import type { Renderer } from '../render/renderer';
 import { Effects } from '../render/effects';
@@ -174,6 +175,7 @@ export class ArenaSession {
     this.eventIds = pickEvents(cfg.events, seed);
     this.hud = new ArenaHud(hudRoot);
     this.hud.show(false);
+    this.watch = new WatchBanner(hudRoot);
   }
 
   // ====================================================================== setup
@@ -247,6 +249,22 @@ export class ArenaSession {
   private get me(): Local | undefined { return this.locals.get(this.self); }
   private name(slot: number) { return slot < 0 ? 'the arena' : this.grid.find((g) => g.slot === slot)?.nickname ?? '?'; }
   private entry(slot: number) { return this.grid.find((g) => g.slot === slot); }
+  private tags = new NameTags();
+  private watch: WatchBanner;
+
+  /** Nicknames over every other car, and the "watching" banner while spectating. */
+  private updateTags() {
+    const cars = [];
+    for (const g of this.grid) {
+      if (g.slot === this.self) continue;
+      const root = this.locals.get(g.slot)?.car.visual.root ?? this.remotes.get(g.slot)?.visual.root;
+      if (root) cars.push({ slot: g.slot, root, name: g.nickname, color: g.color, number: g.number });
+    }
+    const watching = this.cameraTarget() !== this.self ? this.cameraTarget() : -1;
+    this.tags.sync(cars, this.r.camera, watching);
+    const w = watching >= 0 && this.phase !== 'victory' && this.phase !== 'done' ? this.entry(watching) : null;
+    this.watch.set(w ? w.nickname : null, w?.color, w?.number);
+  }
 
   private setPhase(p: Phase) {
     this.phase = p;
@@ -873,7 +891,7 @@ export class ArenaSession {
     }
     this.scoreT -= dt;
     if (this.scoreT <= 0) { this.scoreT = 0.5; this.updateScoreboard(); }
-    if (interactive) this.updateHud();
+    if (interactive) { this.updateTags(); this.updateHud(); }
   }
 
   private sendStates() {
@@ -1051,6 +1069,8 @@ export class ArenaSession {
     this.engine?.dispose();
     this.sfx?.dispose();
     this.hud.show(false);
+    this.tags.dispose();
+    this.watch.dispose();
     if (this.arena) this.r.scene.remove(this.arena.group);
     this.r.scene.remove(this.effects.group, this.events?.group ?? new THREE.Group());
     for (const l of this.locals.values()) this.r.scene.remove(l.car.visual.root);

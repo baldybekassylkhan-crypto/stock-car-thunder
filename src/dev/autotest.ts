@@ -159,17 +159,19 @@ export function installQuickRace(getSession: () => Session | null) {
   (window as Any).__quickRace = async (map = 'sunvale', damage = 'realistic', bots = 9, laps = 10, series = 'stock', car = '') => {
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const btn = (pred: (t: string) => boolean) => [...document.querySelectorAll('button')].find((b) => pred(b.textContent ?? ''));
-    btn((t) => t.startsWith('Single'))?.click();
+    document.querySelector<HTMLElement>('#single')?.click();
     await wait(300);
+    if (series === 'drift') { document.querySelector<HTMLElement>('.mode-tab[data-mode="drift"]')?.click(); await wait(400); }
     const set = (id: string, v: string) => { const el = document.querySelector<HTMLSelectElement>(`#${id}`)!; el.value = v; el.dispatchEvent(new Event('change')); };
     // series first: the track list depends on it
-    set('series', series); set('samecar', car); // car = '' → free choice, else everyone drives it
+    if (series !== 'drift') set('series', series);
+    set('samecar', car); // car = '' → free choice, else everyone drives it
     await wait(100);
     document.querySelector<HTMLElement>(`.map-opt[data-id="${map}"]`)?.click();
     await wait(100);
-    set('dmg', damage); set('laps', String(laps)); set('bots', String(bots));
-    btn((t) => t === 'Start race')?.click();
-    for (let i = 0; i < 80 && !(getSession() as Any)?.bots?.size; i++) await wait(250);
+    set('dmg', damage); if (series !== 'drift') { set('laps', String(laps)); set('bots', String(bots)); }
+    btn((t) => t === 'Start race' || t === 'Start drift session')?.click();
+    for (let i = 0; i < 80 && !(series === 'drift' ? (getSession() as Any)?.race : (getSession() as Any)?.bots?.size); i++) await wait(250);
     await wait(3500);
     const S = getSession() as Any;
     return `${S.map.def?.id ?? map} ${S.cfg.damage} bots=${S.bots.size}`;
