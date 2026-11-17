@@ -251,6 +251,7 @@ export class Session {
     if (!this.car) return;
     this.car.manual = settings.manualGears;
     this.car.tractionControl = settings.tractionControl;
+    this.car.stability = settings.tractionControl;
     this.car.abs = settings.abs;
     this.audio?.setVolume(settings.volume);
   }

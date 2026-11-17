@@ -111,8 +111,9 @@ const STOCK_BASE = {
   damperC: [7000, 6400] as [number, number],
   antiRoll: [26000, 14000] as [number, number],
   bumpStop: 0.2,
-  mu: 1.36,
-  pacejka: { B: 10.5, C: 1.9 },
+  mu: 1.38,
+  // a forgiving tyre: grip falls off gently past the limit, so a slide can be caught
+  pacejka: { B: 13.5, C: 1.5 },
   brakeForce: 9200,
   brakeBias: 0.58,
   steerLock: [0.58, 0.07] as [number, number],
@@ -213,7 +214,7 @@ export const CARS: CarSpec[] = [
     blurb: 'Big low-end shove off the corners, but heavier and a little draggy at the top.',
     mass: 1575,
     inertia: { x: 3560, y: 3960, z: 1065 },
-    mu: 1.385, // wider rear tyres put the torque down
+    mu: 1.405, // wider rear tyres put the torque down
     torque: scaleTorque(STOCK_BASE.torque, (r) => (r < 6000 ? 1.2 : r < 8000 ? 1.07 : 0.975)),
     dragCdA: 1.0,
     gears: [3.15, 2.02, 1.45, 1.0],

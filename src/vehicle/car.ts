@@ -105,6 +105,8 @@ export class Car {
   manual = false;
   tractionControl = true;
   abs = true;
+  /** Stability assist: catches the rear when it steps out (part of the traction-control setting). */
+  stability = true;
   private gear = 1;
   private shiftTimer = 0;
   private steerAngle = 0;
@@ -465,6 +467,25 @@ export class Car {
       const slipRatio = Math.abs(w.omega * WHEEL_RADIUS - vf) / Math.max(5, Math.abs(vf));
       w.slip = Math.max(Math.abs(alpha) / 0.14, slipRatio * 2, w.locked ? 1.2 : 0) * (fs > 500 ? 1 : 0);
       slipSum += w.slip;
+    }
+
+    // ---------- stability assist ----------
+    // When the car yaws faster than the steering asks for (the rear stepping out), a yaw torque
+    // pulls it back. It never adds rotation, so understeer stays understeer.
+    const grounded = this.wheels.filter((w) => w.contact).length >= 3;
+    if (this.stability && grounded && !held && vFwd > 8) {
+      const yaw = _ang.dot(_up);
+      const L = CAR.geo.wheelbaseF - CAR.geo.wheelbaseR;
+      const cap = (CAR.mu * 9.81 * 1.15) / vFwd;
+      const target = THREE.MathUtils.clamp(-vFwd * Math.tan(this.steerAngle) / L, -cap, cap);
+      const excess = yaw - target;
+      const oversteer = Math.sign(excess) === Math.sign(yaw) && Math.abs(yaw) > 0.05;
+      const dead = 0.06;
+      if (oversteer && Math.abs(excess) > dead) {
+        const gain = CAR.series === 'stock' ? 5 : 3;
+        const k = -Math.sign(excess) * Math.min(1.2, Math.abs(excess) - dead) * gain * CAR.inertia.y * dt;
+        b.applyTorqueImpulse({ x: _up.x * k, y: _up.y * k, z: _up.z * k }, true);
+      }
     }
 
     // ---------- aerodynamics ----------

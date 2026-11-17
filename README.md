@@ -124,7 +124,7 @@ debris and networking work the same for both bodies.
 - **Brakes:** carbon brakes only bite fully above about 400 °C.
 - **Fuel:** GP cars start with fuel for the race distance and get faster as it burns off; stock
   cars start full. Running dry stops the engine.
-- **Assists** (Garage & settings): automatic gears, traction control, ABS and a racing-line guide
+- **Assists** (Garage & settings): automatic gears, traction control (which also turns on a stability assist that catches the rear when it steps out), ABS and a racing-line guide. Stock cars use a forgiving tyre whose grip falls off gently past the limit, so slides can be caught.
   on the track (green flat out, yellow lift, red brake).
 - **AI:** plans corners with its current tyre grip, downforce and the dirty air it is in, manages
   overheating tyres, uses the drag flap and boost to attack and defend, and moves aside under blue
