@@ -6,7 +6,7 @@ import type { Zone } from './classes';
  * Combat HUD for the Demolition Arena, in the racing HUD's visual style.
  *  top:          match timer · vehicles left · position · eliminations (+ active modifiers)
  *  bottom left:  health bar and damage stage, engine, armour diagram, speed
- *  bottom right: Nitro / Ram / Repair / Shockwave tiles with cooldown rings
+ *  bottom right: Nitro / Ram / Shockwave tiles with cooldown rings
  *  overlays:     countdown, FIGHT / FINAL TWO banners, kill feed, low-health vignette,
  *                critical-engine warning, hit-direction and incoming-car indicators
  */
@@ -37,7 +37,7 @@ export interface ArenaHudState {
 
 const STAGE_LABEL = ['', 'MINOR DAMAGE', 'MODERATE DAMAGE', 'SEVERE DAMAGE', 'CRITICAL', 'DESTROYED'];
 const STAGE_COLOR = ['', '#3ad17a', '#c6d83a', '#f59e0b', '#ef4444', '#555'];
-const ICON: Record<AbilityId, string> = { nitro: '🔥', ram: '🛡', repair: '🔧', shock: '💥' };
+const ICON: Record<AbilityId, string> = { nitro: '🔥', ram: '🛡', shock: '💥' };
 
 export class ArenaHud {
   private els: Record<string, HTMLElement> = {};

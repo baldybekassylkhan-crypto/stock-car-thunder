@@ -105,7 +105,7 @@ export function arenaLobbyScreen(room: Room, h: ArenaLobbyHandlers) {
     $('#crole').textContent = c.unlockLevel > level ? `Unlocks at level ${c.unlockLevel}` : c.role;
     $('#cblurb').textContent = c.blurb;
     const bar = (label: string, v: number) => `<div class="cbar"><span>${label}</span><div class="cbar-track"><div class="cbar-fill" style="width:${Math.round(v * 100)}%"></div></div></div>`;
-    $('#cbars').innerHTML = bar('Top speed', c.bars.speed) + bar('Acceleration', c.bars.accel) + bar('Handling', c.bars.handling) + bar('Armour', c.bars.armor) + bar('Ram power', c.bars.ram) + bar('Repairs', c.repairs / 3);
+    $('#cbars').innerHTML = bar('Top speed', c.bars.speed) + bar('Acceleration', c.bars.accel) + bar('Handling', c.bars.handling) + bar('Armour', c.bars.armor) + bar('Ram power', c.bars.ram);
     preview.setCar(arenaSpec(c.id, ap.bumper), loadoutColor(ap.paint, profile.color), profile.carNumber);
     $<HTMLSelectElement>('#bumper').value = ap.bumper;
     $<HTMLSelectElement>('#paint').value = ap.paint;

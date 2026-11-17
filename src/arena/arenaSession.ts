@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { initPhysics, PhysicsWorld } from '../physics/world';
+import { initPhysics, PhysicsWorld, RAPIER, RAY_TRACK_ONLY } from '../physics/world';
 import type { Renderer } from '../render/renderer';
 import { Effects } from '../render/effects';
 import { CameraRig } from '../render/cameras';
@@ -19,7 +19,7 @@ import { arenaSpec, classById, type Zone } from './classes';
 import { CombatDamage, collisionDamage, zoneOf, PAIR_COOLDOWN } from './combatDamage';
 import { AbilitySystem, ABILITIES, NITRO_ACCEL, SHOCK, type AbilityId } from './abilities';
 import { ArenaAI, PERSONALITIES, type Combatant, type Personality } from './arenaAI';
-import { ArenaEvents, EVENT_INFO, PICKUP_REPAIR, pickEvents } from './events';
+import { ArenaEvents, EVENT_INFO, pickEvents } from './events';
 import { ArenaHud } from './arenaHud';
 import { ArenaAudio } from './arenaAudio';
 import { loadArenaProfile, type MatchStats } from './rewards';
@@ -205,7 +205,7 @@ export class ArenaSession {
         const cls = classById(g.cls);
         const personality: Personality = PERSONALITIES[(k * 3 + this.seed) % PERSONALITIES.length];
         this.locals.set(g.slot, {
-          slot: g.slot, car, dmg: new CombatDamage(cls), ab: new AbilitySystem(cls.repairs),
+          slot: g.slot, car, dmg: new CombatDamage(cls), ab: new AbilitySystem(),
           ai: g.bot ? new ArenaAI(car, g.slot, personality, this.arena.radius, this.arena.obstacles, g.slot + this.seed) : null,
           input: { steer: 0, throttle: 0, brake: 1, shiftUp: false, shiftDown: false }, flipT: 0,
         });
@@ -218,6 +218,15 @@ export class ArenaSession {
     });
 
     this.rig = new CameraRig(this.r.camera, this.arena.tvCams);
+    // keep the chase camera inside the arena: cars start against the wall, and without this the
+    // camera sat behind the concrete wall, which filled the screen like a big pale cloud
+    const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 });
+    this.rig.occlusion = (from, dir, max) => {
+      ray.origin = { x: from.x, y: from.y, z: from.z };
+      ray.dir = { x: dir.x, y: dir.y, z: dir.z };
+      const hit = this.physics.world.castRay(ray, max, true, undefined, RAY_TRACK_ONLY);
+      return hit ? hit.timeOfImpact : Infinity;
+    };
     try {
       this.engine = new EngineAudio(settings.volume);
       this.engine.resume();
@@ -534,11 +543,7 @@ export class ArenaSession {
   private useAbility(l: Local, id: AbilityId) {
     if (this.phase !== 'combat' || !l.dmg.alive || !l.ab.use(id)) return;
     const me = l.slot === this.self;
-    if (id === 'repair') {
-      l.dmg.repair(classById(this.entry(l.slot)?.cls).repairHp);
-      this.effects.flash(l.car.position.clone().setY(1.5), 2, 0.4, 0x3ad17a);
-      if (me) { this.sfx?.repair(); this.flash('REPAIRED', 1.2, '#3ad17a'); }
-    } else if (id === 'shock') {
+    if (id === 'shock') {
       const p = l.car.position.clone();
       this.room.sendEvent('ashock', { s: l.slot, p: p.toArray().map((x) => +x.toFixed(2)) });
       this.shockwave(l.slot, p);
@@ -652,10 +657,10 @@ export class ArenaSession {
     if (!pk) return;
     const l = this.locals.get(slot);
     if (l) {
-      if (pk.kind === 'repair') l.dmg.repair(PICKUP_REPAIR); else l.ab.refillNitro();
-      if (slot === this.self) { this.sfx?.pickup(); this.flash(pk.kind === 'repair' ? 'REPAIR PICKUP' : 'NITRO READY', 1.4, pk.kind === 'repair' ? '#3ad17a' : '#34b6ff'); }
+      l.ab.refillNitro();
+      if (slot === this.self) { this.sfx?.pickup(); this.flash('NITRO READY', 1.4, '#34b6ff'); }
     }
-    this.effects.flash(pk.pos.clone(), 2.5, 0.3, pk.kind === 'repair' ? 0x3ad17a : 0x34b6ff);
+    this.effects.flash(pk.pos.clone(), 2.5, 0.3, 0x34b6ff);
   }
 
   // ====================================================================== frame
@@ -706,13 +711,12 @@ export class ArenaSession {
     if (interactive && !this.paused) {
       if (wasPressed('KeyC')) { if (me && !me.dmg.alive) this.nextSpectate(); else this.rig.next(); }
       if (me && this.phase === 'combat') {
-        const map: [AbilityId, string[]][] = [['nitro', ['ShiftLeft', 'ShiftRight', 'Digit1']], ['ram', ['KeyF', 'Digit2']], ['repair', ['KeyR', 'Digit3']], ['shock', ['KeyQ', 'Digit4']]];
+        const map: [AbilityId, string[]][] = [['nitro', ['ShiftLeft', 'ShiftRight', 'Digit1']], ['ram', ['KeyF', 'Digit2']], ['shock', ['KeyQ', 'Digit3', 'Digit4']]];
         for (const [id, keys] of map) if (keys.some((k) => wasPressed(k))) this.useAbility(me, id);
         const pad = navigator.getGamepads?.().find((p) => p && p.connected);
         if (pad) {
           if (pad.buttons[0]?.pressed) this.useAbility(me, 'nitro');
           if (pad.buttons[4]?.pressed) this.useAbility(me, 'ram');
-          if (pad.buttons[1]?.pressed) this.useAbility(me, 'repair');
           if (pad.buttons[5]?.pressed) this.useAbility(me, 'shock');
         }
       }
@@ -739,7 +743,7 @@ export class ArenaSession {
       const alive = l.dmg.alive;
       if (l.ai) {
         const meC = combatants.find((c) => c.slot === l.slot)!;
-        l.input = alive ? l.ai.drive(dt, meC, combatants.filter((c) => c.alive), l.dmg.hp, l.ab.repairsLeft, locked) : { steer: 0, throttle: 0, brake: 1, shiftUp: false, shiftDown: false };
+        l.input = alive ? l.ai.drive(dt, meC, combatants.filter((c) => c.alive), l.dmg.hp, locked) : { steer: 0, throttle: 0, brake: 1, shiftUp: false, shiftDown: false };
         for (const id of l.ai.wants) this.useAbility(l, id);
       } else if (l.slot === this.self) {
         l.input = this.paused ? { steer: 0, throttle: 0, brake: 0.3, shiftUp: false, shiftDown: false } : auto ? auto(this) : interactive ? readDriverInput(dt, Math.abs(l.car.telemetry.speed)) : { steer: 0, throttle: 0, brake: 0, shiftUp: false, shiftDown: false };
@@ -992,7 +996,7 @@ export class ArenaSession {
       engine: dmg?.engine ?? 0,
       armor,
       speed: me?.car.telemetry.speed ?? 0,
-      abilities: ABILITIES.map((id) => ({ id, progress: me ? me.ab.progress(id) : 0, active: (me?.ab.active[id] ?? 0) > 0, uses: id === 'repair' ? me?.ab.repairsLeft : undefined })),
+      abilities: ABILITIES.map((id) => ({ id, progress: me ? me.ab.progress(id) : 0, active: (me?.ab.active[id] ?? 0) > 0 })),
       countdown,
       banner: this.time < this.bannerUntil ? this.banner : '',
       bannerColor: this.bannerColor,

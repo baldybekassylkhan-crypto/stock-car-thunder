@@ -16,9 +16,6 @@ export interface CombatClass {
   armor: Record<Zone, number>;
   /** Damage multiplier when this car hits with its front. */
   ram: number;
-  /** Repair kits per match and HP restored per kit. */
-  repairs: number;
-  repairHp: number;
   /** Player level needed to drive it (progression; all classes are balanced). */
   unlockLevel: number;
   /** 0..1 bars for the picker. */
@@ -60,35 +57,35 @@ export const CLASSES: CombatClass[] = [
   {
     id: 'balanced', name: 'Balanced Stock Car', role: 'All-rounder', unlockLevel: 0,
     blurb: 'Average speed, armour and punch. A safe pick that does a bit of everything.',
-    armor: { front: 0.25, rear: 0.2, left: 0.2, right: 0.2 }, ram: 1.0, repairs: 2, repairHp: 200,
+    armor: { front: 0.25, rear: 0.2, left: 0.2, right: 0.2 }, ram: 1.0,
     bars: { speed: 0.6, accel: 0.6, handling: 0.6, armor: 0.55, ram: 0.55 },
     spec: make('balanced', { mass: 1600 }, 1.0),
   },
   {
     id: 'speed', name: 'Speed Demon', role: 'Hit and run', unlockLevel: 0,
     blurb: 'Light, quick and agile. Paper armour: strike from the side and get away.',
-    armor: { front: 0.08, rear: 0.05, left: 0.05, right: 0.05 }, ram: 0.85, repairs: 2, repairHp: 200,
+    armor: { front: 0.08, rear: 0.05, left: 0.05, right: 0.05 }, ram: 0.85,
     bars: { speed: 0.95, accel: 0.95, handling: 0.95, armor: 0.2, ram: 0.35 },
     spec: make('speed', { mass: 1320, mu: 1.46, steerLock: [0.62, 0.09] }, 1.12),
   },
   {
     id: 'tank', name: 'Heavy Tanker', role: 'Unstoppable', unlockLevel: 0,
     blurb: 'Enormously tough and heavy: wins every shoving match, but slow to get going.',
-    armor: { front: 0.42, rear: 0.4, left: 0.38, right: 0.38 }, ram: 1.15, repairs: 2, repairHp: 200,
+    armor: { front: 0.42, rear: 0.4, left: 0.38, right: 0.38 }, ram: 1.15,
     bars: { speed: 0.4, accel: 0.3, handling: 0.35, armor: 0.95, ram: 0.75 },
     spec: make('tank', { mass: 2150, mu: 1.3, steerLock: [0.52, 0.07] }, 1.08),
   },
   {
     id: 'rammer', name: 'Rammer', role: 'Battering ram', unlockLevel: 2,
     blurb: 'A reinforced plough on the front hits harder than anything else. Weak at the back.',
-    armor: { front: 0.55, rear: 0.08, left: 0.15, right: 0.15 }, ram: 1.45, repairs: 2, repairHp: 200,
+    armor: { front: 0.55, rear: 0.08, left: 0.15, right: 0.15 }, ram: 1.45,
     bars: { speed: 0.65, accel: 0.7, handling: 0.5, armor: 0.5, ram: 1.0 },
     spec: make('rammer', { mass: 1820 }, 1.1),
   },
   {
     id: 'survivor', name: 'Survivor', role: 'Last one standing', unlockLevel: 4,
-    blurb: 'Well armoured, handles nicely and carries an extra repair kit. Low punch.',
-    armor: { front: 0.3, rear: 0.3, left: 0.3, right: 0.3 }, ram: 0.85, repairs: 3, repairHp: 240,
+    blurb: 'Well armoured, handles nicely and shrugs off hits from every side. Low punch.',
+    armor: { front: 0.3, rear: 0.3, left: 0.3, right: 0.3 }, ram: 0.85,
     bars: { speed: 0.55, accel: 0.55, handling: 0.8, armor: 0.75, ram: 0.4 },
     spec: make('survivor', { mass: 1680, mu: 1.42 }, 1.0),
   },

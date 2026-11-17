@@ -76,7 +76,7 @@ export class ArenaAI {
     this.target = best;
   }
 
-  drive(dt: number, me: Combatant, all: Combatant[], hp: number, repairsLeft: number, locked: boolean): DriverInput {
+  drive(dt: number, me: Combatant, all: Combatant[], hp: number, locked: boolean): DriverInput {
     this.wants = [];
     const car = this.car;
     const sp = car.telemetry.speed;
@@ -114,7 +114,6 @@ export class ArenaAI {
 
       // ---------- abilities ----------
       const t2 = all.find((o) => o.slot === this.target);
-      if (hp < (this.personality === 'defensive' || this.personality === 'survival' ? 480 : 340) && repairsLeft > 0 && !threat) this.wants.push('repair');
       const near = all.filter((o) => o.alive && o.slot !== me.slot && o.pos.distanceTo(me.pos) < SHOCK.radius * 0.7).length;
       if (near >= 2 || (threat && threat.pos.distanceTo(me.pos) < 7)) this.wants.push('shock');
       if (t2 && this.mode === 'hunt') {

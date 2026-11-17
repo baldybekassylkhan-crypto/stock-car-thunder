@@ -30,12 +30,11 @@ export function pickEvents(setting: string, seed: number): EventId[] {
 }
 
 interface Zone { x: number; z: number; r: number }
-export interface Pickup { id: number; kind: 'repair' | 'nitro'; pos: THREE.Vector3; mesh: THREE.Group; taken: boolean }
+export interface Pickup { id: number; kind: 'nitro'; pos: THREE.Vector3; mesh: THREE.Group; taken: boolean }
 
 const SUDDEN_START = 90;
 const SUDDEN_SHRINK = 60;
 const PICKUP_EVERY = 18;
-export const PICKUP_REPAIR = 250;
 
 export class ArenaEvents {
   readonly group = new THREE.Group();
@@ -112,16 +111,12 @@ export class ArenaEvents {
       const id = this.spawned++;
       const r = rng(this.seed * 13 + id * 101);
       const a = r() * Math.PI * 2, d = 10 + r() * (this.radius - 20);
-      const kind: Pickup['kind'] = id % 2 === 0 ? 'repair' : 'nitro';
+      const kind: Pickup['kind'] = 'nitro'; // no repairs in the arena: every pickup is nitro
       const pos = new THREE.Vector3(Math.cos(a) * d, 1.2, Math.sin(a) * d);
       const mesh = new THREE.Group();
-      const color = kind === 'repair' ? 0x3ad17a : 0x34b6ff;
-      const core = new THREE.Mesh(kind === 'repair' ? new THREE.BoxGeometry(1, 1, 1) : new THREE.OctahedronGeometry(0.75), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2.2 }));
+      const color = 0x34b6ff;
+      const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.75), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2.2 }));
       mesh.add(core);
-      if (kind === 'repair') {
-        const crossMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        mesh.add(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 1.02), crossMat), new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.2, 1.02), crossMat));
-      }
       const halo = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 32), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, side: THREE.DoubleSide }));
       halo.rotation.x = -Math.PI / 2;
       halo.position.y = -1.1;

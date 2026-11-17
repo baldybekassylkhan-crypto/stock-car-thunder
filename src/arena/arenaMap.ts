@@ -186,6 +186,20 @@ export function buildArena(): ArenaMap {
   group.add(junk);
 
   // ---------- stands with an animated crowd ----------
+  /** Flat annular sector (x = r·sin a, z = r·cos a like CylinderGeometry), facing up. */
+  const stepGeo = (r0: number, r1: number, a0: number, len: number, y: number) => {
+    const seg = 48, pos: number[] = [], idx: number[] = [];
+    for (let k = 0; k <= seg; k++) {
+      const a = a0 + (k / seg) * len;
+      pos.push(Math.sin(a) * r0, y, Math.cos(a) * r0, Math.sin(a) * r1, y, Math.cos(a) * r1);
+      if (k < seg) { const i = k * 2; idx.push(i, i + 1, i + 2, i + 1, i + 3, i + 2); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  };
   const standMat = new THREE.MeshStandardMaterial({ color: 0x8f8a82, roughness: 0.9 });
   const tiers = 12;
   const people: { k: number; y: number; ph: number }[] = [];
@@ -197,11 +211,16 @@ export function buildArena(): ArenaMap {
     const a0 = (s / 4) * Math.PI * 2 + 0.1, len = Math.PI / 2 - 0.2;
     for (let t = 0; t < tiers; t++) {
       const rad = R + 3 + t * 1.6, y = 1.8 + t * 0.9;
-      const tread = new THREE.CylinderGeometry(rad + 1.6, rad + 1.6, 0.9, 48, 1, false, a0, len);
-      tread.translate(0, y - 0.45, 0);
-      const m = new THREE.Mesh(tread, standMat);
+      // riser (open-ended: closed caps on a partial cylinder are pie slices that covered the
+      // whole arena like pale clouds) plus a flat step on top
+      const riser = new THREE.CylinderGeometry(rad + 1.6, rad + 1.6, 0.9, 48, 1, true, a0, len);
+      riser.translate(0, y - 0.45, 0);
+      const m = new THREE.Mesh(riser, standMat);
       m.receiveShadow = true;
       group.add(m);
+      const step = new THREE.Mesh(stepGeo(rad + 1.6, rad + 3.2, a0, len, y), standMat);
+      step.receiveShadow = true;
+      group.add(step);
       const n = Math.floor(len * rad / 0.75);
       for (let k = 0; k < n && ci < crowd.count; k++) {
         if (r() < 0.22) continue;

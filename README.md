@@ -160,8 +160,8 @@ A separate mode from the main menu (single player or online room with a code and
 
 - **Classes:** Balanced, Speed Demon, Heavy Tanker, Rammer and Survivor (the last two unlock with levels), each with its own speed, mass, armour and ramming power.
 - **Damage:** 1000 HP, armour per side that wears down, and five damage stages that cost power, steering and grip. Hitting with your own nose is safest; getting T-boned hurts most.
-- **Abilities:** Nitro (Shift / 1), Reinforced Ram (F / 2), Emergency Repair (R / 3), Shockwave (Q / 4), each with a cooldown.
-- **Match:** intro, countdown, combat, a "final two" showdown and results with rewards. Optional events (double damage, low gravity, fire zones, oil slicks, sudden death, repair and nitro pickups). A typical 8-car match lasts about two minutes.
+- **Abilities:** Nitro (Shift / 1), Reinforced Ram (F / 2) and Shockwave (Q / 3), each with a cooldown. There is no repairing: damage stays for the whole match.
+- **Match:** intro, countdown, combat, a "final two" showdown and results with rewards. Optional events (double damage, low gravity, fire zones, oil slicks, sudden death, nitro pickups). A typical 8-car match lasts about two minutes.
 
 ## Damage and crashes
 
