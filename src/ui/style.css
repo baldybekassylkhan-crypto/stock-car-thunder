@@ -288,11 +288,11 @@ input.code { font-family: var(--font-display); font-size: 34px; letter-spacing: 
 .anytrack input { vertical-align: middle; margin: 0 2px 0 0; }
 
 /* lobby mode switch: racing or the Demolition Arena, picked by the host */
-.mode-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; }
-.mode-tab { flex: 1 1 180px; padding: 12px 16px; border-radius: 12px; border: 2px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.04); color: inherit; font: 700 18px var(--font-display); letter-spacing: 0.5px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
-.mode-tab:hover:not(:disabled) { border-color: rgba(255, 204, 0, 0.6); }
-.mode-tab.active { border-color: var(--accent); background: rgba(255, 204, 0, 0.14); color: var(--accent); }
-.mode-tab[data-mode="arena"].active { border-color: #ff5a28; background: rgba(232, 53, 44, 0.18); color: #ff8a5c; }
-.mode-tab:disabled { cursor: default; opacity: 0.75; }
-.mode-tab:disabled.active { opacity: 1; }
-.mode-tabs .note { flex-basis: 100%; margin: 0; }
+.mode-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 18px; padding: 5px; border-radius: 14px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); }
+.mode-tab { appearance: none; flex: 1 1 160px; padding: 12px 16px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--muted); font: 800 17px var(--font-display); letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s; }
+.mode-tab:hover:not(:disabled):not(.active) { color: #fff; background: rgba(255, 255, 255, 0.06); }
+.mode-tab.active { color: #111; background: linear-gradient(180deg, #ffd84a, #f2b600); border-color: rgba(255, 255, 255, 0.25); box-shadow: 0 4px 14px rgba(255, 204, 0, 0.25); }
+.mode-tab[data-mode="arena"].active { color: #fff; background: linear-gradient(180deg, #ff6a3d, #d9341f); box-shadow: 0 4px 14px rgba(232, 53, 44, 0.3); }
+.mode-tab:disabled { cursor: default; }
+.mode-tab:disabled:not(.active) { opacity: 0.6; }
+.mode-tabs .note { flex-basis: 100%; margin: 2px 6px 0; font-size: 13px; }
