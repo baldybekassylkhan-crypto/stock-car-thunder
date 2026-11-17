@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { toCollider, type ColliderMesh } from '../tracks/build';
 import type { Atmosphere } from '../tracks/maps';
 import * as tex from '../render/textures';
-import { rng, SPONSOR_BOARDS } from '../tracks/props';
+import { rng, SPONSOR_BOARDS, zharkynCanvas } from '../tracks/props';
 import { textDecal } from '../vehicle/carModel';
 
 /**
@@ -522,7 +522,10 @@ function addWallBanners(group: THREE.Group) {
     const a = (seg / 12) * Math.PI * 2 + 0.12 + 0.2 + 0.16;
     const bg = colors[seg % colors.length];
     const fg = bg === '#f2c200' ? '#111111' : '#ffffff';
-    const tex = textDecal(names[seg % names.length], bg, fg, 1024, 128);
+    const name = names[seg % names.length];
+    let tex: THREE.Texture;
+    if (name === 'ZHARKYN') { tex = new THREE.CanvasTexture(zharkynCanvas()); tex.colorSpace = THREE.SRGBColorSpace; }
+    else tex = textDecal(name, bg, fg, 1024, 128);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(14, 1.1), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7 }));
     const rr = R - 0.25;
     m.position.set(Math.cos(a) * rr, 0.78, Math.sin(a) * rr);

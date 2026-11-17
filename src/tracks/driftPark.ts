@@ -97,7 +97,7 @@ export async function loadDriftPark(): Promise<LoadedMap> {
         c.group.add(m);
       }
       // neon signs on poles around the course
-      const neon = ['DRIFT PARK', 'NEON DOCKS', 'SIDEWAYS', 'NO GRIP CLUB', 'SMOKE SHOW', 'ANGLE KINGS'];
+      const neon = ['DRIFT PARK', 'ZHARKYN', 'SIDEWAYS', 'NO GRIP CLUB', 'ZHARKYN', 'ANGLE KINGS'];
       const hues = [300, 190, 50, 130, 0, 260];
       neon.forEach((txt, k) => {
         const i = c.track.wrap(Math.round((k / neon.length) * c.n) + 40);

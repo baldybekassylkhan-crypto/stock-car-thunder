@@ -105,8 +105,74 @@ export function mountainRing(group: THREE.Group, o: { r0: number; r1: number; he
   group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })));
 }
 
-/** Billboard with a fictional sponsor. */
+/**
+ * The Zharkyn mascot logo, drawn in vector: a soft white drop with two pointed tips on top and
+ * two closed, smiling eyes. Drawn centred at (cx, cy) with height `size`.
+ */
+export function drawZharkynLogo(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
+  const s = size / 200;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(s, s);
+  // soft shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.35)';
+  ctx.shadowBlur = 18;
+  ctx.shadowOffsetY = 8;
+  // body: round bottom, two tips on top (left one shorter), a scoop between them
+  const body = new Path2D();
+  body.moveTo(-88, 10);
+  body.bezierCurveTo(-92, -50, -50, -86, -10, -92); // up the left side to the left tip
+  body.bezierCurveTo(4, -94, 8, -82, 0, -70); // round the left tip, into the scoop
+  body.bezierCurveTo(-8, -52, 8, -38, 30, -44); // bottom of the scoop
+  body.bezierCurveTo(52, -50, 62, -76, 70, -86); // up to the right tip
+  body.bezierCurveTo(82, -98, 92, -76, 92, -48); // round the right tip, down the right side
+  body.bezierCurveTo(96, 30, 60, 94, 0, 96); // round bottom
+  body.bezierCurveTo(-58, 96, -86, 60, -88, 10);
+  body.closePath();
+  const grad = ctx.createRadialGradient(-30, -40, 10, 0, 0, 120);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(1, '#dcdde0');
+  ctx.fillStyle = grad;
+  ctx.fill(body);
+  ctx.shadowColor = 'transparent';
+  // closed, smiling eyes
+  ctx.strokeStyle = '#1b1b1d';
+  ctx.lineWidth = 15;
+  ctx.lineCap = 'round';
+  for (const ex of [-44, 40]) {
+    ctx.beginPath();
+    ctx.arc(ex, 18, 24, Math.PI * 1.12, Math.PI * 1.88);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** A 1024×256 Zharkyn board: logo on the left, the name in big letters. */
+export function zharkynCanvas(bg = '#111827') {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 256;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createLinearGradient(0, 0, 1024, 256);
+  g.addColorStop(0, bg);
+  g.addColorStop(1, '#2a1f4d');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 1024, 256);
+  drawZharkynLogo(ctx, 150, 132, 200);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '900 132px "Barlow Condensed", "Arial Narrow", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('ZHARKYN', 285, 138, 700);
+  return c;
+}
+
+/** Billboard with a fictional sponsor (the ZHARKYN boards carry the mascot logo). */
 export function billboard(text: string, hue: number, w = 32, h = 8) {
+  if (text === 'ZHARKYN') {
+    const t = new THREE.CanvasTexture(zharkynCanvas());
+    t.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: t, roughness: 0.6, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.2 }));
+  }
   const c = document.createElement('canvas');
   c.width = 1024; c.height = 256;
   const ctx = c.getContext('2d')!;
@@ -118,4 +184,4 @@ export function billboard(text: string, hue: number, w = 32, h = 8) {
   return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: t, roughness: 0.6, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.15 }));
 }
 
-export const SPONSOR_BOARDS = ['DUNEBLAZE ENERGY', 'RIDGEBACK TIRES', 'KESTREL MOTOR OIL', 'QUORRA INSURANCE', 'HOLLOWPEAK TOOLS', 'SOLANO SNACKS', 'VANTIX PARTS', 'MAKO TOOLS'];
+export const SPONSOR_BOARDS = ['ZHARKYN', 'RIDGEBACK TIRES', 'KESTREL MOTOR OIL', 'ZHARKYN', 'HOLLOWPEAK TOOLS', 'SOLANO SNACKS', 'ZHARKYN', 'MAKO TOOLS'];

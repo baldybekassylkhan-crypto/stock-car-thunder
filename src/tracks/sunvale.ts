@@ -5,6 +5,7 @@ import { buildOval, infieldShape, ribbon } from './build';
 import type { LoadedMap } from './maps';
 import { makeGrid } from './maps';
 import * as tex from '../render/textures';
+import { zharkynCanvas } from './props';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const deg = THREE.MathUtils.degToRad;
@@ -297,15 +298,18 @@ export async function loadSunvale(): Promise<LoadedMap> {
 
   // ---------- billboards on the backstretch outside ----------
   {
-    const names = ['DUNEBLAZE ENERGY', 'RIDGEBACK TIRES', 'KESTREL MOTOR OIL', 'QUORRA INSURANCE', 'HOLLOWPEAK TOOLS', 'SOLANO SNACKS'];
+    const names = ['ZHARKYN', 'RIDGEBACK TIRES', 'KESTREL MOTOR OIL', 'ZHARKYN', 'HOLLOWPEAK TOOLS', 'SOLANO SNACKS'];
     names.forEach((name, k) => {
-      const c = document.createElement('canvas');
-      c.width = 1024; c.height = 256;
-      const ctx = c.getContext('2d')!;
-      const hue = (k * 57) % 360;
-      ctx.fillStyle = `hsl(${hue},70%,40%)`; ctx.fillRect(0, 0, 1024, 256);
-      ctx.fillStyle = '#fff'; ctx.font = 'italic 900 96px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(name, 512, 128);
+      let c = document.createElement('canvas');
+      if (name === 'ZHARKYN') c = zharkynCanvas();
+      else {
+        c.width = 1024; c.height = 256;
+        const ctx = c.getContext('2d')!;
+        const hue = (k * 57) % 360;
+        ctx.fillStyle = `hsl(${hue},70%,40%)`; ctx.fillRect(0, 0, 1024, 256);
+        ctx.fillStyle = '#fff'; ctx.font = 'italic 900 96px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(name, 512, 128);
+      }
       const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
       const i = track.wrap(Math.round(track.n * 0.5) + 160 + k * 40);
       const b = new THREE.Mesh(new THREE.PlaneGeometry(32, 8), new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 }));
