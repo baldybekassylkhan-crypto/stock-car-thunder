@@ -24,8 +24,14 @@ Multiplayer (up to 12 players per room, joined with a 6-character room code, plu
 | B | 12 human players, up to 32 cars with AI; LOD, batched snapshots, compact leaderboard | ✅ done |
 | C | Car choice in every race type: 6 cars in 2 series, open-wheel body, lobby car picker | ✅ done |
 | D | Open-Wheel GP driving model: aero wake, drag flap, energy boost, tyres, brakes, fuel, flags and penalties | ✅ done |
-| E | Pit stops (both series) | next |
-| F | Three new GP circuits | |
+| E | Pit stops (both series): pit lane, speed limit, crews, pit plan, AI strategy, two-compound rule | ✅ done |
+| F | Three new GP circuits: Harbor Point, Velmont Park, Desert Ring Al-Sahra | ✅ done |
+
+### Demolition Arena
+
+| What | State |
+|---|---|
+| Last-car-standing derby: 5 car classes, health/armour, abilities, 4 AI personalities, match events, rewards, online rooms | ✅ done |
 
 ## Run locally
 
@@ -56,7 +62,8 @@ Open http://localhost:5173.
 | C | Cycle camera (chase, far chase, hood, cockpit, TV) · next car when spectating |
 | Mouse drag | Hold a mouse button and drag to look around; release and the camera swings back |
 | Hold R (3 s) | Reset car to the track (5 s penalty in a race) · new car in free practice after a wreck |
-| Esc / P | Pause |
+| B | Open / close the pit plan; 1–4 change tyres, fuel, repair, front wing |
+| Esc / P | Pause (the host can end the race for everyone and send them back to the lobby) |
 | F3 | Debug overlay |
 
 Gamepad: left stick steers, RT/LT are throttle/brake, LB/RB shift, A opens the drag flap, hold B for boost, Y changes camera, holding X for 3 s resets.
@@ -128,7 +135,33 @@ debris and networking work the same for both bodies.
   is a 5 s penalty. Time penalties are added to the finish time on the results screen. A car about
   to be lapped sees a blue flag.
 
-The rule that a dry GP race must use two dry compounds needs pit stops and comes with milestone E.
+A dry GP race must use two different dry compounds; a car that doesn't gets 30 s added at the end.
+
+## Pit stops
+
+- Every track has a pit lane with a speed limit (80 km/h for GP cars, 72 km/h for stock cars), a crew at each box and a pit wall.
+- Press **B** to open the pit plan: tyres, fuel (stock cars), damage repair and a new front wing (GP cars). Drive into the pit lane and the car stops in its box by itself.
+- A stop takes at most **10 seconds** (tyres, fuel, repair and a slow wheel nut add time up to that cap). Speeding in the pit lane is a penalty.
+- AI drivers plan their own stops around tyre wear, fuel, damage and the weather, spread out so they don't all pit on the same lap.
+
+## Grand Prix circuits
+
+| Track | Length | Character |
+|---|---|---|
+| Harbor Point Street Circuit | 3.3 km | Night street race between walls, a tunnel, harbour and yachts |
+| Velmont Park | 5.1 km | Fast parkland circuit with elevation, gravel traps and armco |
+| Desert Ring Al-Sahra | 5.3 km | Modern circuit at dusk with two long straights, hairpins and wide tarmac run-off |
+
+GP circuits appear in the lobby when the series is Open-Wheel GP; tick **any track** to race any car on any track.
+
+## Demolition Arena
+
+A separate mode from the main menu (single player or online room with a code and link). Up to 16 cars in a walled dirt arena; the last car running wins.
+
+- **Classes:** Balanced, Speed Demon, Heavy Tanker, Rammer and Survivor (the last two unlock with levels), each with its own speed, mass, armour and ramming power.
+- **Damage:** 1000 HP, armour per side that wears down, and five damage stages that cost power, steering and grip. Hitting with your own nose is safest; getting T-boned hurts most.
+- **Abilities:** Nitro (Shift / 1), Reinforced Ram (F / 2), Emergency Repair (R / 3), Shockwave (Q / 4), each with a cooldown.
+- **Match:** intro, countdown, combat, a "final two" showdown and results with rewards. Optional events (double damage, low gravity, fire zones, oil slicks, sudden death, repair and nitro pickups). A typical 8-car match lasts about two minutes.
 
 ## Damage and crashes
 
@@ -139,7 +172,7 @@ The rule that a dry GP race must use two dry compounds needs pit stops and comes
 - **Damage setting:** *Realistic*, *Brutal* (lower thresholds, ~1.8× damage, a ~70 mph head-on is fatal) or *Off* (visual dents only).
 - Damage profiles per car class live in `src/damage/damage.ts` (`DAMAGE_PROFILES`). The open-wheel profile sheds wings and suspension more easily but rarely burns.
 - Dev check: in `npm run dev`, start a race with `await __quickRace('sunvale', 'realistic', 9)`, then run `__damageTest(480)`. It fast-forwards an all-AI pack race and reports destroyed cars, an impact histogram and `pass`.
-- A wreck brings out the yellow flag. In a race a destroyed car is out (DNF) and you spectate; in free practice hold R for a new car.
+- A wreck brings out the yellow flag. A destroyed car comes back **20 seconds** later with a fresh car and keeps racing (you watch other cars meanwhile); in free practice you can also hold R for a new car straight away.
 
 ## How it works
 

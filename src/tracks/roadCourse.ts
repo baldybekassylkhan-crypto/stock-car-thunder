@@ -68,7 +68,7 @@ export function stripeTexture(a: string, b: string) {
 
 /** Centreline from control points, scaled to the target length, starting at the start point. */
 export function roadCentreline(def: Pick<RoadCourseDef, 'ctrl' | 'length' | 'start'>): THREE.Vector3[] {
-  const curve = new THREE.CatmullRomCurve3(def.ctrl.map(([x, z, e]) => new THREE.Vector3(x, e, z)), true, 'catmullrom', 0.5);
+  const curve = new THREE.CatmullRomCurve3(def.ctrl.map(([x, z, e]) => new THREE.Vector3(x, e, z)), true, 'centripetal');
   let pts = curve.getPoints(8000);
   pts.pop();
   let len2d = 0;
