@@ -291,6 +291,7 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
   sameSel.addEventListener('change', () => { room.setSettings({ sameCar: sameSel.value }); render(); });
 
   const render = () => {
+    if (!root.isConnected) return; // lobby not on screen (e.g. a player joined mid-race)
     const s = room.settings;
     const map = MAPS.find((m) => m.id === s.map) ?? MAPS[0];
     const offered = mapsFor(s.series, !!s.anyTrack);

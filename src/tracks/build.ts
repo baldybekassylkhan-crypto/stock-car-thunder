@@ -279,6 +279,7 @@ export function buildOval(track: Track, o: OvalOptions): BuiltTrack {
       box: inner0 - width * 0.55,
       inside: -o.apron - 0.8,
       boxFrom: track.wrap(wFrom + Math.round(spacing / 2)), boxSpacing: spacing,
+      edge: inner0 - width,
     };
   }
 
@@ -344,6 +345,7 @@ export function buildPitLane(track: Track, o: { from: number; to: number; taper:
     box,
     inside: -(wallD - 2),
     boxFrom: track.wrap(wFrom + Math.round(o.boxSpacing / 2)), boxSpacing: o.boxSpacing,
+    edge: outer,
   };
   return { group, colliders, pit };
 }

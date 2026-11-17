@@ -23,6 +23,8 @@ export interface PitInfo {
   /** First stall and spacing between stalls (samples). */
   boxFrom: number;
   boxSpacing: number;
+  /** Lateral offset of the lane's garage-side edge (pit equipment stands just beyond it). */
+  edge?: number;
 }
 
 export interface PitPlan {

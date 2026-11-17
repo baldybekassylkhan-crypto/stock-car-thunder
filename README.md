@@ -74,10 +74,14 @@ Gamepad: left stick steers, RT/LT are throttle/brake, LB/RB shift, A opens the d
 2. Friends click **Join room** and type the code, or just open the link.
 3. Everyone presses **Ready**, then the host picks the track, laps, damage level, AI drivers and weather and clicks **Start race**.
 
+Anyone who opens the code or link while a race or arena match is running joins as a **spectator**: they watch the cars (Space or C switches to the next car) and drive in the next race.
+
 Up to 12 people can join a room, and the host can fill the grid with AI drivers up to 32 cars. Connections go directly browser-to-browser over WebRTC.
 A few strict corporate or mobile networks block direct WebRTC connections; on those, players may not be able to connect (there is no relay server).
 
 ## Car choice
+
+Each car also looks different: Vanguard SR is the clean baseline, Ironhide 427 has a power-bulge hood with a scoop, chrome grille, side pipes and a tall spoiler, Stiletto Aero is low with canards and a ducktail, Titan HD-7 has big multi-element wings, Falcon LD-3 a long slim nose, thin wings and a shark fin. Rims and maker badges differ per model (`src/vehicle/carStyles.ts`).
 
 The host picks the **series** for the room, and every driver picks a car from it in the lobby (single
 races too). The picker shows a rotating 3D preview, stat bars, top speed, power and weight. The host
@@ -144,6 +148,10 @@ A dry GP race must use two different dry compounds; a car that doesn't gets 30 s
 - A stop takes at most **10 seconds** (tyres, fuel, repair and a slow wheel nut add time up to that cap). Speeding in the pit lane is a penalty.
 - AI drivers plan their own stops around tyre wear, fuel, damage and the weather, spread out so they don't all pit on the same lap.
 
+## Track detail
+
+Every race track gets building facades with window grids (part of the windows lit, glowing at night and at dusk) and pit lane equipment at each stall: tyre stacks (with coloured tyre blankets for GP cars), tool trolleys, an overhead pit boom with a light and an air hose, team signs, and fuel rigs for stock cars (`src/tracks/detail.ts`).
+
 ## Grand Prix circuits
 
 | Track | Length | Character |
@@ -160,6 +168,7 @@ A separate mode from the main menu (single player or online room with a code and
 
 - **Classes:** Balanced, Speed Demon, Heavy Tanker, Rammer and Survivor (the last two unlock with levels), each with its own speed, mass, armour and ramming power.
 - **Damage:** 1000 HP, armour per side that wears down, and five damage stages that cost power, steering and grip. Hitting with your own nose is safest; getting T-boned hurts most.
+- **Trampolines:** five blue pads (one in the middle, four around it) launch a car about 7 m into the air.
 - **Abilities:** Nitro (Shift / 1), Reinforced Ram (F / 2) and Shockwave (Q / 3), each with a cooldown. There is no repairing: damage stays for the whole match.
 - **Match:** intro, countdown, combat, a "final two" showdown and results with rewards. Optional events (double damage, low gravity, fire zones, oil slicks, sudden death, nitro pickups). A typical 8-car match lasts about two minutes.
 
@@ -172,7 +181,8 @@ A separate mode from the main menu (single player or online room with a code and
 - **Damage setting:** *Realistic*, *Brutal* (lower thresholds, ~1.8× damage, a ~70 mph head-on is fatal) or *Off* (visual dents only).
 - Damage profiles per car class live in `src/damage/damage.ts` (`DAMAGE_PROFILES`). The open-wheel profile sheds wings and suspension more easily but rarely burns.
 - Dev check: in `npm run dev`, start a race with `await __quickRace('sunvale', 'realistic', 9)`, then run `__damageTest(480)`. It fast-forwards an all-AI pack race and reports destroyed cars, an impact histogram and `pass`.
-- A wreck brings out the yellow flag. A destroyed car comes back **20 seconds** later with a fresh car and keeps racing (you watch other cars meanwhile); in free practice you can also hold R for a new car straight away.
+- A wreck (or a car stopped on track) brings out a **local yellow**: only cars from 300 m before it to 80 m past it have to slow down; the rest of the field keeps racing at full speed.
+- After a wreck: A destroyed car comes back **20 seconds** later with a fresh car and keeps racing (you watch other cars meanwhile); in free practice you can also hold R for a new car straight away.
 
 ## How it works
 

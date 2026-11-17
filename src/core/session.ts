@@ -21,6 +21,7 @@ import { LapProgress } from './progress';
 import { readDriverInput, wasPressed, clearPressed, resetHeld, readMouseLook, RESET_HOLD, type DriverInput } from './input';
 import { settings } from './profile';
 import { encodeState, decodeState } from '../net/codec';
+import { addTrackDetail } from '../tracks/detail';
 import { RaceDirector, easeLimit, type RaceSnapshot, type ResultRow } from '../race/race';
 import { PART_NAMES, type PartName, type CarVisual } from '../vehicle/carModel';
 import type { LoadedMap, MapDef } from '../tracks/maps';
@@ -137,6 +138,7 @@ export class Session {
     onProgress(`Building ${this.mapDef.name}…`);
     await new Promise((res) => setTimeout(res, 30));
     this.map = await this.mapDef.load({ rain: this.cfg.weather === 'rain' && !!this.mapDef.weather });
+    addTrackDetail(this.map, this.cfg.series === 'gp' ? 'gp' : 'stock');
     onProgress('Rolling cars onto the grid…');
     this.physics = new PhysicsWorld();
     this.physics.addTrack(this.map.colliders, this.map.groundY ?? -0.03);
