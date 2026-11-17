@@ -93,7 +93,7 @@ export async function loadCedarRidge(o: MapLoadOptions): Promise<LoadedMap> {
   const outR = smoothArr(kap.map((x, i) => (x > 0 ? turn[i] : 0)), 25);
   const outL = smoothArr(kap.map((x, i) => (x < 0 ? turn[i] : 0)), 25);
   // pit lane beside the main straight (left side): widen the run-off there to fit it
-  const PIT = { from: -250, to: 60, taper: 45, wallD: 9, laneWidth: 7, boxSpacing: 6 };
+  const PIT = { from: -250, to: 60, taper: 60, wallD: 9, laneWidth: 7, boxSpacing: 5 };
   // 0..1: how much of the pit-lane run-off is needed here (ramps in/out over 60 samples so the
   // barrier moves out smoothly ahead of the pit entry instead of stepping across the lane)
   const pitRun = (i: number) => {
@@ -162,8 +162,10 @@ export async function loadCedarRidge(o: MapLoadOptions): Promise<LoadedMap> {
   // ---------- runoff: grass everywhere, gravel traps on corner exits ----------
   const grassSet = tex.grass();
   const grassMat = new THREE.MeshStandardMaterial({ ...grassSet, roughness: 1, color: rain ? 0x8fa486 : 0xa8bc98 });
-  const gL = ribbon(track, null, (i) => [track.surface(i, -runL[i]).addScaledVector(UP, -0.02), track.surface(i, -CURB).addScaledVector(UP, -0.02)], { uAcross: [0, 4], vScale: 6 });
-  const gR = ribbon(track, null, (i) => [track.surface(i, WIDTH + CURB).addScaledVector(UP, -0.02), track.surface(i, WIDTH + runR[i]).addScaledVector(UP, -0.02)], { uAcross: [0, 4], vScale: 6 });
+  // the grass runs on under the road edge: on straights (no kerbs) there would otherwise be a gap
+  // between road and grass that a wheel could drop into, letting the car slip through the surface
+  const gL = ribbon(track, null, (i) => [track.surface(i, -runL[i]).addScaledVector(UP, -0.02), track.surface(i, 0.4).addScaledVector(UP, -0.02)], { uAcross: [0, 4], vScale: 6 });
+  const gR = ribbon(track, null, (i) => [track.surface(i, WIDTH - 0.4).addScaledVector(UP, -0.02), track.surface(i, WIDTH + runR[i]).addScaledVector(UP, -0.02)], { uAcross: [0, 4], vScale: 6 });
   for (const g of [gL, gR]) {
     const m = new THREE.Mesh(g, grassMat);
     m.receiveShadow = true;

@@ -20,7 +20,7 @@ export async function loadIronHollow(_o: MapLoadOptions): Promise<LoadedMap> {
   const built = buildOval(track, {
     apron: APRON, wallHeight: 1.2, fenceHeight: 5.5,
     // long enough for 32 stalls (10 m apart): the pit road runs round into the turns
-    pit: { from: -110, to: 110, width: 11, taper: 16, boxSpacing: 5 },
+    pit: { from: -110, to: 110, width: 11, taper: 30, boxSpacing: 4 },
     surface: 'concrete',
     roughness: 0.5,
   });

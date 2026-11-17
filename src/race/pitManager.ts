@@ -181,9 +181,9 @@ export class PitManager {
             const lapsLeft = this.host.laps ? this.host.laps - this.host.lapsDone(slot) : 99;
             const usedDry = [...car.tyres.used].filter((c) => DRY_COMPOUNDS.includes(c)).length;
             // free practice (laps = 0): stop when tyres or damage need it, no compound rule
-            // this car's own lap for the mandatory stop: spread between 30 % and 70 % of the race
+            // this car's own lap for the mandatory stop: spread between 30 % and 60 % of the race (room to retry)
             const k = this.host.order.indexOf(slot);
-            const ruleLap = Math.max(1, Math.min(this.host.laps - 1, Math.round(this.host.laps * (0.3 + 0.4 * ((k * 0.618) % 1)))));
+            const ruleLap = Math.max(1, Math.min(this.host.laps - 1, Math.round(this.host.laps * (0.3 + 0.3 * ((k * 0.618) % 1)))));
             const plan = botWantsPit(car, { lapsLeft, caution: this.host.caution(), rain: this.host.rain, usedDry, totalLaps: this.host.laps, trackKm: this.track.length / 1000, ruleLap });
             if (plan) {
               s.plan = plan;

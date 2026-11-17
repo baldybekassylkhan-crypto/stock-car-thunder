@@ -115,10 +115,10 @@ export class BotDriver {
     if (toExit < taperOut) return THREE.MathUtils.lerp(2.5, info.lane, THREE.MathUtils.smoothstep(toExit / taperOut, 0, 1));
     if (!p.served) {
       const toBox = this.ahead(i, p.box);
-      // turn into the stall well before it, while still rolling
-      if (toBox < 70 && toBox < this.track.length / 2) return THREE.MathUtils.lerp(info.box, info.lane, THREE.MathUtils.smoothstep((toBox - 12) / 58, 0, 1));
+      // stay in the fast lane past the other stalls (cars are stopped there), turn in at the last moment
+      if (toBox < 16 && toBox < this.track.length / 2) return THREE.MathUtils.lerp(info.box, info.lane, THREE.MathUtils.smoothstep((toBox - 2) / 14, 0, 1));
       if (this.ahead(p.box, i) < 15) return info.box;
-    } else if (this.ahead(p.box, i) < 30) return THREE.MathUtils.lerp(info.box, info.lane, this.ahead(p.box, i) / 30);
+    } else if (this.ahead(p.box, i) < 12) return THREE.MathUtils.lerp(info.box, info.lane, THREE.MathUtils.smoothstep(this.ahead(p.box, i) / 12, 0, 1));
     return info.lane;
   }
 
@@ -132,7 +132,8 @@ export class BotDriver {
       if (d < 500) v = Math.sqrt((p.limit - 0.6) ** 2 + 2 * 6 * d);
       // arrive at the pit entry slowly enough to swing across in the taper (≤ ~90 mph)
       const toEntry = this.ahead(i, info.entry);
-      const entrySpeed = THREE.MathUtils.clamp(this.ahead(info.entry, info.limitFrom) * 0.27, p.limit, 36);
+      // road courses: reach the entry at the limit (short tapers); ovals: ease down without blocking the racing line
+      const entrySpeed = this.oval ? THREE.MathUtils.clamp(this.ahead(info.entry, info.limitFrom) * 0.27, p.limit, 36) : p.limit + 1;
       if (toEntry < 800 && !within(tr, i, info.entry, info.exit)) v = Math.min(v, Math.sqrt(entrySpeed * entrySpeed + 2 * 5 * toEntry));
     }
     if (!p.served) {
