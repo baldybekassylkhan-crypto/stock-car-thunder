@@ -83,6 +83,8 @@ A few strict corporate or mobile networks block direct WebRTC connections; on th
 
 ## Car choice
 
+**Sports cars and supercars** race in the stock series too, each with its own body (built from its own side profile, cabin, lights and livery) and its own character: Valkyr GT-R (grip, Japanese GT), Corsa Veloce 12 (V12 top speed, long-bonnet GT), Strada Furia V10 (power, mid-engined wedge), Sabre RS (light and nimble, rear-engined coupe), Halcyon GT (grand tourer, easy on tyres), Tempest Hyper (downforce, hypercar), Rattler ACR (low-end torque, American supercar) and Nordlys E-GT (electric punch). Performance stays close to the stock cars so races stay fair (`src/vehicle/supercarBody.ts`, `superStyles.ts`).
+
 Each car also looks different: Vanguard SR is the clean baseline, Ironhide 427 has a power-bulge hood with a scoop, chrome grille, side pipes and a tall spoiler, Stiletto Aero is low with canards and a ducktail, Titan HD-7 has big multi-element wings, Falcon LD-3 a long slim nose, thin wings and a shark fin. Rims and maker badges differ per model (`src/vehicle/carStyles.ts`).
 
 The host picks the **series** for the room, and every driver picks a car from it in the lobby (single

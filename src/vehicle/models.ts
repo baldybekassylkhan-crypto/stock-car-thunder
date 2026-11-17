@@ -12,7 +12,7 @@ export function buildCarModel(opts: { number: number; color: string; seed: numbe
     return ow;
   }
   const v = buildStockModel(opts);
-  if (spec && !spec.kit) applyCarStyle(v, spec);
+  if (spec && !spec.kit) applyCarStyle(v, spec, opts.number);
   if (spec?.kit) addDerbyKit(v, spec.kit);
   return v;
 }

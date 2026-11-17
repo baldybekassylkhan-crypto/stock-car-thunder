@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import type { CarVisual } from './carModel';
 import { contrast, decalPlane, textDecal } from './carModel';
 import type { CarSpec } from './catalog';
+import { isSupercar, styleSupercar } from './superStyles';
 
 /**
  * Per-model body details, so the six cars are easy to tell apart on track:
@@ -17,7 +18,7 @@ import type { CarSpec } from './catalog';
  *    and a tall shark fin.
  * Every car also wears its maker's badge.
  */
-export function applyCarStyle(v: CarVisual, spec: CarSpec) {
+export function applyCarStyle(v: CarVisual, spec: CarSpec, number = 0) {
   const accentColor = contrast(v.primary) === '#111111' ? '#1b1b1b' : '#f2f2f2';
   const accent = new THREE.MeshPhysicalMaterial({ color: accentColor, metalness: 0.3, roughness: 0.35, clearcoat: 1 });
   const chrome = new THREE.MeshStandardMaterial({ color: 0xdadde2, metalness: 1, roughness: 0.15 });
@@ -55,6 +56,10 @@ export function applyCarStyle(v: CarVisual, spec: CarSpec) {
 
     if (spec.series === 'drift') {
       styleDrift(v, spec.id, { add, rims, accent, carbon, black, chrome });
+      return;
+    }
+    if (isSupercar(spec.id)) {
+      styleSupercar(v, spec.id, { accent, carbon, black, chrome, rims }, number);
       return;
     }
 
