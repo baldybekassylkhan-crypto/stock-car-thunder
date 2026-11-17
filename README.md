@@ -23,8 +23,8 @@ Multiplayer (up to 12 players per room, joined with a 6-character room code, plu
 | A | Stock-car damage fix: contact is cosmetic, only big crashes wreck cars; steadier AI on banked turns | ✅ done |
 | B | 12 human players, up to 32 cars with AI; LOD, batched snapshots, compact leaderboard | ✅ done |
 | C | Car choice in every race type: 6 cars in 2 series, open-wheel body, lobby car picker | ✅ done |
-| D | Open-Wheel GP driving model | next |
-| E | Pit stops (both series) | |
+| D | Open-Wheel GP driving model: aero wake, drag flap, energy boost, tyres, brakes, fuel, flags and penalties | ✅ done |
+| E | Pit stops (both series) | next |
 | F | Three new GP circuits | |
 
 ## Run locally
@@ -51,13 +51,15 @@ Open http://localhost:5173.
 | S / ↓ | Brake (hold while stopped to reverse) |
 | A D / ← → | Steer |
 | Q / E | Shift down / up (manual gearbox; toggle with M) |
+| F | Open the drag-reduction flap (DRS) when the HUD shows it available (GP cars) |
+| Shift (hold) | Energy boost (GP cars; recharges under braking) |
 | C | Cycle camera (chase, far chase, hood, cockpit, TV) · next car when spectating |
 | Mouse drag | Hold a mouse button and drag to look around; release and the camera swings back |
 | Hold R (3 s) | Reset car to the track (5 s penalty in a race) · new car in free practice after a wreck |
 | Esc / P | Pause |
 | F3 | Debug overlay |
 
-Gamepad: left stick steers, RT/LT are throttle/brake, LB/RB shift, Y changes camera, holding X for 3 s resets.
+Gamepad: left stick steers, RT/LT are throttle/brake, LB/RB shift, A opens the drag flap, hold B for boost, Y changes camera, holding X for 3 s resets.
 
 ## Playing online
 
@@ -93,6 +95,40 @@ aero, geometry, collision hull, damage profile); `src/vehicle/car.ts` reads all 
 it. The open-wheel body is built in `src/vehicle/openWheelModel.ts` and reuses the stock car's damage
 part slots (front wing, nose cone, sidepods, engine cover, rear wing, diffuser, wheels), so damage,
 debris and networking work the same for both bodies.
+
+## Open-Wheel GP driving model
+
+- **Aero:** downforce grows with speed squared. Following within about 1.5 s of another car puts you
+  in its wake, which costs front downforce (understeer); the slipstream on the straights cuts drag
+  over a longer distance than for stock cars.
+- **Drag-reduction flap (DRS):** each circuit gets zones on its longest straights. Cross the
+  detection point within 1.0 s of the car ahead and the HUD's DRS light turns yellow in the next
+  zone: press F to open the rear-wing flap (green), which cuts drag and rear downforce. It shuts
+  when you brake or the zone ends. Enabled after the first lap and 20 s after a restart, never
+  under yellow flags.
+- **Energy boost:** hold Shift for about 160 hp of electric power while the battery lasts; it
+  recharges under braking. Shown as the purple ERS bar.
+- **Tyres:** each tyre has a temperature and wear. Cold tyres slide, each compound has a
+  temperature window, overheating costs grip and wears tyres faster, and worn tyres fall off a
+  cliff near the end. Compounds: Soft (fast, short-lived), Medium, Hard (slow, long-lived),
+  Intermediate and Wet (rain races start on intermediates). Pick your starting tyre in the lobby.
+  Different tracks suit different compounds: Cedar Ridge runs cool (softs work), Sunvale is
+  high-load (hards last). The HUD shows each tyre's wear (number) and temperature (colour).
+- **Brakes:** carbon brakes only bite fully above about 400 °C.
+- **Fuel:** GP cars start with fuel for the race distance and get faster as it burns off; stock
+  cars start full. Running dry stops the engine.
+- **Assists** (Garage & settings): automatic gears, traction control, ABS and a racing-line guide
+  on the track (green flat out, yellow lift, red brake).
+- **AI:** plans corners with its current tyre grip, downforce and the dirty air it is in, manages
+  overheating tyres, uses the drag flap and boost to attack and defend, and moves aside under blue
+  flags.
+- **Race control:** local yellow flags around incidents (no DRS there), safety car for wrecks and
+  virtual safety car for stopped cars in GP races (cautions for stock cars). Road courses enforce
+  track limits: three warnings, then a 5 s time penalty. In GP races, hitting the car in front hard
+  is a 5 s penalty. Time penalties are added to the finish time on the results screen. A car about
+  to be lapped sees a blue flag.
+
+The rule that a dry GP race must use two dry compounds needs pit stops and comes with milestone E.
 
 ## Damage and crashes
 

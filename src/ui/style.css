@@ -193,3 +193,27 @@ input.code { font-family: var(--font-display); font-size: 34px; letter-spacing: 
 .players .pname { display: flex; flex-direction: column; line-height: 1.15; }
 .players .pcar { color: var(--muted); font-weight: 400; font-size: 12px; }
 @media (max-width: 700px) { .carpick { grid-template-columns: 1fr; } }
+
+/* open-wheel / tyre HUD */
+.flagnote { font-size: 13px; font-weight: 800; letter-spacing: 0.06em; color: #fff; min-height: 0; }
+.gp { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; font-family: var(--font-body); }
+.tyremap { display: grid; grid-template-columns: 22px 18px 22px; grid-template-rows: 26px 26px; gap: 3px; align-items: center; justify-items: center; }
+.tyremap i { width: 22px; height: 26px; border-radius: 5px; font: 700 10px var(--font-body); font-style: normal; color: #071018; display: flex; align-items: center; justify-content: center; text-shadow: none; }
+.tyremap b { grid-row: 1 / span 2; grid-column: 2; width: 18px; height: 18px; border-radius: 50%; border: 3px solid #f2d22e; font: 800 10px var(--font-display); display: flex; align-items: center; justify-content: center; color: #fff; }
+.tyremap i[data-t="2"] { grid-column: 1; grid-row: 2; }
+.tyremap i[data-t="3"] { grid-column: 3; grid-row: 2; }
+.gp-bars { width: 120px; font-size: 11px; text-align: left; }
+.gp-bars div { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.gp-bars span { width: 38px; color: var(--muted); }
+.gp-bars i { flex: 1; height: 7px; background: rgba(0, 0, 0, 0.5); border-radius: 4px; overflow: hidden; }
+.gp-bars b { display: block; height: 100%; width: 100%; background: #a855f7; }
+.gp-bars em { font-style: normal; color: #eef1f6; }
+.gp-bars .drs { font-family: var(--font-display); font-size: 15px; font-weight: 800; color: rgba(255, 255, 255, 0.25); }
+.gp-bars .drs.avail { color: #facc15; }
+.gp-bars .drs.open { color: #3ad17a; text-shadow: 0 0 10px rgba(58, 209, 122, 0.8); }
+
+.tyrepick { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.tyrepick span { margin-right: 4px; }
+.tyre-btn { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; font-size: 12px; height: auto; }
+.tyre-btn b { width: 16px; height: 16px; border-radius: 50%; border: 3px solid; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; color: #fff; }
+.tyre-btn.sel { border-color: var(--accent); background: rgba(255, 204, 0, 0.12); color: #fff; }

@@ -1,5 +1,6 @@
 import type { Track } from '../tracks/track';
 import type { CarTelemetry } from '../vehicle/car';
+import { COMPOUNDS, type Compound } from '../vehicle/tyres';
 import type { CarDamage, PanelName } from '../damage/damage';
 import type { Flag } from '../race/race';
 import { fmtTime } from '../core/progress';
@@ -35,6 +36,13 @@ export interface HudState {
   draft: number;
   spotter: string;
   penalty: number;
+  /** Time penalties (s) added to the player's race time. */
+  timePenalty: number;
+  blue: boolean;
+  localYellow: boolean;
+  tyres: { temp: number[]; wear: number[]; compound: Compound; window: [number, number] };
+  fuel: number;
+  fuelLaps: number;
   status: string;
   markers: { x: number; z: number; color: string; self: boolean }[];
   debug: string | null;
@@ -75,6 +83,7 @@ export class Hud {
       </div>
       <div class="hud-tc">
         <div class="flag" data-k="flag"></div>
+        <div class="flagnote" data-k="flagnote"></div>
         <div class="banner" data-k="banner"></div>
         <div class="countdown" data-k="cd"></div>
         <div class="spotter" data-k="spot"></div>
@@ -89,6 +98,16 @@ export class Hud {
             <div><span>TEMP</span><i><b data-k="temp"></b></i></div>
             <div><span>TIRES</span><i><b data-k="tires"></b></i></div>
             <div class="draft" data-k="draft">DRAFT</div>
+          </div>
+        </div>
+        <div class="gp">
+          <div class="tyremap" title="Tyre temperature and wear">
+            <i data-t="0"></i><i data-t="1"></i><b data-k="cmp">M</b><i data-t="2"></i><i data-t="3"></i>
+          </div>
+          <div class="gp-bars">
+            <div data-k="ersrow"><span>ERS</span><i><b data-k="ers"></b></i></div>
+            <div><span>FUEL</span><em data-k="fuel"></em></div>
+            <div class="drs" data-k="drs">DRS</div>
           </div>
         </div>
         <div><span class="gear" data-k="gear">1</span><span class="speed" data-k="spd">0<small>MPH</small></span></div>
@@ -141,13 +160,38 @@ export class Hud {
     e.hint.textContent = `${s.camera} cam`;
     e.banner.textContent = s.banner;
     e.banner.style.color = s.bannerColor ?? '';
-    e.flag.style.background = FLAG_COLORS[s.flag];
-    e.flag.style.display = s.flag === 'none' ? 'none' : '';
+    // blue and local yellow flags are shown to this driver on top of the race flag
+    const flagBg = s.blue ? '#2563eb' : s.localYellow ? FLAG_COLORS.yellow : FLAG_COLORS[s.flag];
+    e.flag.style.background = flagBg;
+    e.flag.style.display = s.flag === 'none' && !s.blue ? 'none' : '';
+    e.flagnote.textContent = s.blue ? 'BLUE FLAG' : s.localYellow ? 'LOCAL YELLOW' : '';
     e.cd.textContent = s.countdown > 0 ? String(Math.ceil(s.countdown - 1) || 'GO') : '';
     e.cd.style.display = s.countdown > 0 ? '' : 'none';
     if (s.countdown > 0 && s.countdown < 1) e.cd.textContent = 'GO!';
     e.spot.textContent = s.spotter;
-    e.status.textContent = s.penalty > 0 ? `PENALTY ${s.penalty.toFixed(1)}s` : s.status;
+    e.status.textContent = s.penalty > 0 ? `PENALTY ${s.penalty.toFixed(1)}s` : s.status || (s.timePenalty > 0 ? `+${s.timePenalty}s TIME PENALTY` : '');
+
+    // tyres: colour = temperature against the compound's window, number = wear
+    const ty = s.tyres;
+    const [lo, hi] = ty.window;
+    this.root.querySelectorAll<HTMLElement>('.tyremap i').forEach((el) => {
+      const k = Number(el.dataset.t);
+      const T = ty.temp[k];
+      el.style.background = T < lo - 8 ? '#3b82f6' : T < lo ? '#60c0f0' : T <= hi ? '#3ad17a' : T <= hi + 12 ? '#f59e0b' : '#ef4444';
+      el.textContent = String(Math.round((1 - ty.wear[k]) * 100));
+    });
+    const cmp = COMPOUNDS[ty.compound];
+    e.cmp.textContent = cmp.tag;
+    e.cmp.style.borderColor = cmp.color;
+    e.fuel.textContent = `${s.fuel.toFixed(1)} kg · ${s.fuelLaps >= 99 ? '99+' : s.fuelLaps.toFixed(1)} laps`;
+    const hasErs = !Number.isNaN(t.battery);
+    e.ersrow.style.display = hasErs ? '' : 'none';
+    if (hasErs) {
+      e.ers.style.width = `${Math.round(t.battery * 100)}%`;
+      e.ers.style.background = t.boosting ? '#f0f' : '#a855f7';
+    }
+    e.drs.style.display = hasErs ? '' : 'none';
+    e.drs.className = `drs ${t.drs === 2 ? 'open' : t.drs === 1 ? 'avail' : ''}`;
     e.debug.style.display = s.debug ? '' : 'none';
     if (s.debug) e.debug.textContent = s.debug;
     e.draft.classList.toggle('on', s.draft > 0.05);

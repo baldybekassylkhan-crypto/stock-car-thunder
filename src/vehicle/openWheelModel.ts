@@ -287,5 +287,6 @@ export function buildOpenWheelModel(opts: { number: number; color: string; seed:
     primary,
     comHeight: g.comHeight,
     engineBay: new THREE.Vector3(0, 0.55, -1.2),
+    drsFlap: flap,
   };
 }

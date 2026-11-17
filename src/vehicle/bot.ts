@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { DriverInput } from '../core/input';
 import type { Track } from '../tracks/track';
 import type { Car } from './car';
+import { COMPOUNDS } from './tyres';
 
 export interface Traffic {
   pos: THREE.Vector3;
@@ -39,6 +40,10 @@ export class BotDriver {
   /** Smoothed throttle: no snapping off the gas mid-corner (lift-off oversteer). */
   private thr = 0;
   wantsReset = false;
+  /** Set by the session: shown the blue flag (about to be lapped) → let the faster car by. */
+  blue = false;
+  /** Slowly filtered wake: plan for dirty air without jumpy target speeds. */
+  private wakeF = 0;
 
   constructor(readonly car: Car, private track: Track, private skill: number, private oval: boolean, seed: number) {
     const r = ((seed * 9301 + 49297) % 233280) / 233280;
@@ -47,7 +52,7 @@ export class BotDriver {
   }
 
   /** Corner speed at sample i for a car at lateral offset `lane` (inside lanes are tighter turns). */
-  private maxSpeedAt(i: number, lane = this.track.width / 2): number {
+  maxSpeedAt(i: number, lane = this.track.width / 2): number {
     const tr = this.track;
     const kc = tr.curvature[tr.wrap(i)];
     if (Math.abs(kc) < 1e-4) return 200;
@@ -69,17 +74,23 @@ export class BotDriver {
   }
 
   /** Car grip relative to the reference stock car the base numbers were tuned on. */
-  private get gripK() { return this.car.spec.mu / 1.36; }
+  // current tyre grip (temperature, wear, compound) is part of what the car can do right now
+  private get gripK() { return (this.car.spec.mu / 1.36) * this.car.tyreGrip; }
   /** Downforce per mass per (m/s)² beyond the reference stock car (negative = less). */
-  private get aeroC() { return (0.5 * 1.225 * this.car.spec.liftClA) / this.car.spec.mass - C_STOCK; }
+  private get aeroC() {
+    // in another car's wake some front downforce is gone: plan corners for what is left
+    const wake = 1 - this.car.spec.wakeLoss * this.wakeF * 0.75;
+    return (0.5 * 1.225 * this.car.spec.liftClA * wake) / this.car.mass - C_STOCK;
+  }
   /** Braking deceleration available at speed v (downforce helps). */
-  private decelAt(v: number) {
-    return (this.oval ? 8.5 : 7) * this.gripK * (1 + Math.max(0, this.aeroC) * v * v / G * 0.5);
+  decelAt(v: number) {
+    return (this.oval ? 8.5 : 7) * this.gripK * Math.min(1, this.car.brakeEff / 0.9) * (1 + Math.max(0, this.aeroC) * v * v / G * 0.5);
   }
 
   drive(dt: number, traffic: Traffic[], raceSpeedLimit: number): DriverInput {
     const car = this.car, tr = this.track;
     const p = car.position;
+    this.wakeF += (Math.max(this.wakeF * 0.98, car.wake) - this.wakeF) * Math.min(1, dt * 1.2);
     this.i = tr.nearest(p, this.i || -1, 60);
     const i = this.i;
     const d = (this.d = tr.lateral(p, i));
@@ -175,6 +186,12 @@ export class BotDriver {
       vT = Math.min(vT, v);
     }
     vT *= 0.97 + 0.03 * this.skill;
+    // tyre management: back off a little when the tyres overheat
+    const t = this.car.tyres.temp, hi = COMPOUNDS[this.car.tyres.compound].window[1];
+    const over = Math.max(0, (t[0] + t[1] + t[2] + t[3]) / 4 - hi);
+    if (over > 3) vT *= Math.max(0.95, 1 - over * 0.003);
+    // blue flag: lift slightly so the leader can get by
+    if (this.blue) vT *= 0.95;
     // drifting toward the outside wall: lift a little
     if (wallGap < 3) vT *= 0.985 - Math.max(0, 3 - wallGap) * 0.01;
     // don't drive into the back of a slower car: keep a braking gap to anything ahead in our line
@@ -194,7 +211,7 @@ export class BotDriver {
     // trail braking: the tighter the corner is already loading the tyres, the less brake is left
     const vCorner = this.maxSpeedAt(i, d);
     const latUse = THREE.MathUtils.clamp((sp * sp) / (vCorner * vCorner), 0, 1);
-    brake = Math.min(brake, Math.max(0.25, 1 - latUse * 0.8));
+    brake = Math.min(brake, Math.max(0.2, 1 - latUse * 0.95));
     if (Math.abs(sp) < 3 && raceSpeedLimit > 1) { throttle = 1; brake = 0; }
     // sliding (rotating faster than the corner): no power until it's caught, or it spins
     const slide = Math.abs(yawErr);
@@ -222,6 +239,13 @@ export class BotDriver {
       }
     } else { this.progT = 0; this.progI = -1; }
 
-    return { steer, throttle, brake, shiftUp: false, shiftDown: false };
+    // energy boost on straights when there is charge to spare (more eagerly when chasing or defending)
+    let boost = false;
+    if (this.car.spec.ers && throttle > 0.95 && brake === 0 && sp > 25) {
+      let straightAhead = true;
+      for (let j = 0; j < Math.round(120 / tr.ds); j += 3) if (Math.abs(tr.curvature[tr.wrap(i + j)]) > 3.5e-3) { straightAhead = false; break; }
+      boost = straightAhead && car.telemetry.battery > (gapAhead < 40 ? 0.1 : 0.3);
+    }
+    return { steer, throttle, brake, shiftUp: false, shiftDown: false, drs: car.drsAllowed, boost };
   }
 }

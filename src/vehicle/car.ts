@@ -6,6 +6,7 @@ import type { DriverInput } from '../core/input';
 import type { CarVisual } from './carModel';
 import { buildCarModel } from './models';
 import { carSpec, type CarSpec } from './catalog';
+import { TyreSet, type Compound } from './tyres';
 import { buildLod } from './carLod';
 import type { SurfaceKind } from '../tracks/build';
 
@@ -67,6 +68,11 @@ export interface CarTelemetry {
   slip: number;
   /** Redline of this car's engine (for the rev bar). */
   maxRpm: number;
+  /** Drag-reduction flap: 0 not allowed here, 1 available (press to open), 2 open. */
+  drs: 0 | 1 | 2;
+  /** Energy-boost battery 0..1 (NaN when the car has none) and whether it is deploying. */
+  battery: number;
+  boosting: boolean;
 }
 
 export interface CarContact {
@@ -109,18 +115,40 @@ export class Car {
   private curQuat = new THREE.Quaternion();
   /** 0 = clean air, up to ~0.35 = deep in another car's draft (milestone 3+). */
   draft = 0;
+  /** 0..1: how deep the car is in another car's turbulent wake (costs downforce). */
+  wake = 0;
+  /** Set by the session: the track is wet (tyre compounds behave differently). */
+  wetTrack = false;
+  /** Ambient temperature (°C) for tyres and brakes. */
+  ambient = 25;
+  readonly tyres: TyreSet;
+  /** Brake disc temperature (°C): carbon brakes only bite properly when hot. */
+  brakeTemp: number;
+  /** Fuel on board (kg): adds weight and runs the engine. */
+  fuel = 0;
+  /** Energy-boost battery (J). */
+  battery = 0;
+  /** Set by the session each frame: inside a drag-flap zone and eligible to open it. */
+  drsAllowed = false;
+  drsOpen = false;
+  private massT = 0;
+  private appliedFuel = -1;
 
   readonly spec: CarSpec;
   /** Static suspension compression and wheel hardpoint height (depend on the spec). */
   private staticComp: number;
   private hardpointY: number;
 
-  constructor(private physics: PhysicsWorld, opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, damageLevel: DamageLevel = 'realistic', spec: CarSpec = carSpec(undefined)) {
+  constructor(private physics: PhysicsWorld, opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, damageLevel: DamageLevel = 'realistic', spec: CarSpec = carSpec(undefined), compound?: Compound) {
     this.spec = spec;
+    this.tyres = new TyreSet(compound ?? (spec.series === 'gp' ? 'medium' : 'stock'), spec.tyreStartTemp, spec.tyreWear);
+    this.brakeTemp = spec.carbonBrakes ? 380 : 200;
+    this.fuel = spec.fuelTank;
+    this.battery = spec.ers ? spec.ers.capacity : 0;
     const g = spec.geo;
     this.staticComp = (spec.mass * 9.81) / 4 / ((spec.springK[0] + spec.springK[1]) / 2);
     this.hardpointY = -(g.comHeight - g.wheelRadius) + spec.restLength - this.staticComp;
-    this.telemetry = { speed: 0, rpm: spec.idle, gear: 1, throttle: 0, brake: 0, steer: 0, limiter: false, slip: 0, maxRpm: spec.redline };
+    this.telemetry = { speed: 0, rpm: spec.idle, gear: 1, throttle: 0, brake: 0, steer: 0, limiter: false, slip: 0, maxRpm: spec.redline, drs: 0, battery: spec.ers ? 1 : NaN, boosting: false };
     this.damage = new CarDamage(damageLevel, spec.mass, spec.damage);
     const w = physics.world;
     this.body = w.createRigidBody(
@@ -163,6 +191,20 @@ export class Car {
     this.snapshot();
     this.snapshot();
   }
+
+  /** Current mass with fuel (kg). */
+  get mass() { return this.spec.mass + this.fuel; }
+
+  /** Carbon brakes: ~70 % bite when cold, full at 400 °C, fading above 1,100 °C. */
+  get brakeEff() {
+    if (!this.spec.carbonBrakes) return 1;
+    const T = this.brakeTemp;
+    if (T > 1100) return Math.max(0.75, 1 - (T - 1100) / 1200);
+    return THREE.MathUtils.clamp(0.7 + ((T - 150) / 250) * 0.3, 0.7, 1);
+  }
+
+  /** Average tyre grip right now (for the AI). */
+  get tyreGrip() { return this.tyres.avgGrip(this.wetTrack); }
 
   get position(): THREE.Vector3 {
     const t = this.body.translation();
@@ -229,10 +271,28 @@ export class Car {
     if (this.shiftTimer > 0) this.shiftTimer -= dt;
     let torque = 0;
     if (this.shiftTimer <= 0) {
-      torque = limiter ? 0 : torqueAt(CAR.torque, rpm) * throttle * this.damage.power;
+      torque = limiter || this.fuel <= 0 ? 0 : torqueAt(CAR.torque, rpm) * throttle * this.damage.power;
       if (throttle < 0.05) torque = -(40 + rpm * 0.012) * THREE.MathUtils.clamp(Math.abs(vFwd) / 5, 0, 1); // engine braking (only when rolling)
     }
     let driveForce = (torque * ratio * CAR.finalDrive * 0.88) / WHEEL_RADIUS;
+    // energy boost: extra electric power while the driver holds the boost button on the throttle
+    let boosting = false;
+    if (CAR.ers && input.boost && throttle > 0.8 && this.gear > 0 && this.battery > 0 && this.shiftTimer <= 0 && !held) {
+      const p = CAR.ers.power * this.damage.power;
+      driveForce += p / Math.max(12, Math.abs(vFwd));
+      this.battery = Math.max(0, this.battery - p * dt);
+      boosting = true;
+    }
+    // harvest under braking (and a trickle off the throttle)
+    if (CAR.ers && Math.abs(vFwd) > 10 && !boosting) {
+      const harvest = brake > 0.05 ? CAR.ers.power * 0.8 * Math.min(1, brake * 1.5) : throttle < 0.05 ? CAR.ers.power * 0.15 : 0;
+      this.battery = Math.min(CAR.ers.capacity, this.battery + harvest * dt);
+    }
+    // drag-reduction flap: opens on request inside a zone, shuts on the brakes or when the zone ends
+    if (CAR.drs) {
+      if (!this.drsAllowed || brake > 0.05 || held) this.drsOpen = false;
+      else if (input.drs) this.drsOpen = true;
+    }
     if (this.gear === -1) driveForce = Math.max(-5000, Math.min(5000, driveForce));
 
     // automatic / manual shifting
@@ -316,8 +376,8 @@ export class Car {
       // grip
       const grip = SURFACE_GRIP[w.surface];
       const loadSens = 1 - Math.min(0.25, (fs / 5000) * 0.07);
-      const fMax = CAR.mu * grip * loadSens * fs * this.gripScale * this.damage.cornerGrip(i);
-      const mCorner = CAR.mass / 4;
+      const fMax = CAR.mu * grip * loadSens * fs * this.gripScale * this.damage.cornerGrip(i) * this.tyres.grip(i, this.wetTrack);
+      const mCorner = this.mass / 4;
 
       // lateral demand first (traction control leaves room for it)
       const { B, C } = CAR.pacejka;
@@ -335,7 +395,7 @@ export class Car {
         }
         fx += d;
       }
-      const bf = brake * CAR.brakeForce * (w.front ? 1 : (1 - CAR.brakeBias) / CAR.brakeBias);
+      const bf = brake * CAR.brakeForce * this.brakeEff * (w.front ? 1 : (1 - CAR.brakeBias) / CAR.brakeBias);
       if (bf > 0) {
         let fb = bf;
         if (fb > fMax) {
@@ -378,13 +438,18 @@ export class Car {
 
     // ---------- aerodynamics ----------
     const rho = 1.225;
-    const dragMag = 0.5 * rho * CAR.dragCdA * (1 + this.damage.dragAdd) * (1 - this.draft) * speed * speed;
+    const drs = this.drsOpen && CAR.drs ? CAR.drs : null;
+    const dragMag = 0.5 * rho * CAR.dragCdA * (drs ? drs.drag : 1) * (1 + this.damage.dragAdd) * (1 - this.draft) * speed * speed;
     if (speed > 0.1) b.applyImpulse({ x: (-_lin.x / speed) * dragMag * dt, y: (-_lin.y / speed) * dragMag * dt, z: (-_lin.z / speed) * dragMag * dt }, true);
     const down = 0.5 * rho * CAR.liftClA * vFwd * vFwd;
     // roof flaps: deploy when travelling backwards/sideways fast, killing lift so the car stays down
     this.flapsOpen = CAR.roofFlaps && speed > 30 && _lin.dot(_fwd) / speed < -0.3;
     if (this.flapsOpen) b.applyImpulse({ x: 0, y: -0.5 * rho * 1.4 * speed * speed * dt, z: 0 }, true);
-    for (const [z, share] of [[CAR.geo.wheelbaseF, CAR.aeroFront * this.damage.aeroFront], [CAR.geo.wheelbaseR, (1 - CAR.aeroFront) * this.damage.aeroRear]] as const) {
+    // dirty air behind another car costs mostly front downforce (understeer); the flap dumps rear wing
+    const wl = CAR.wakeLoss * this.wake;
+    const frontShare = CAR.aeroFront * this.damage.aeroFront * (1 - wl);
+    const rearShare = (1 - CAR.aeroFront) * this.damage.aeroRear * (1 - wl * 0.45) * (drs ? drs.rear : 1);
+    for (const [z, share] of [[CAR.geo.wheelbaseF, frontShare], [CAR.geo.wheelbaseR, rearShare]] as const) {
       _p.set(0, 0, z).applyQuaternion(_q).add(t as THREE.Vector3Like);
       const f = down * share * dt;
       b.applyImpulseAtPoint({ x: -_up.x * f, y: -_up.y * f, z: -_up.z * f }, _p, true);
@@ -400,7 +465,29 @@ export class Car {
     tm.steer = this.steerAngle;
     tm.limiter = limiter && throttle > 0.5;
     tm.slip = slipSum / 4;
-    if (this.damage.tick(dt, rpm, speed)) this.pendingExplode = true;
+    tm.drs = !CAR.drs ? 0 : this.drsOpen ? 2 : this.drsAllowed ? 1 : 0;
+    tm.battery = CAR.ers ? this.battery / CAR.ers.capacity : NaN;
+    tm.boosting = boosting;
+
+    // ---------- tyres, brakes, fuel ----------
+    const staticLoad = (this.mass * 9.81) / 4;
+    for (let i = 0; i < 4; i++) {
+      const w = this.wheels[i];
+      if (this.wheelGone[i]) continue;
+      this.tyres.update(dt, i, w.slip, w.load / staticLoad, vFwd, w.contact, this.wetTrack, this.ambient);
+    }
+    const av2 = Math.abs(vFwd);
+    // hard braking from speed adds several hundred °C; airflow cools the discs on the straights
+    this.brakeTemp += (brake * av2 * 7 - (this.brakeTemp - this.ambient) * (0.006 + av2 * 0.0003)) * dt;
+    if (this.fuel > 0) this.fuel = Math.max(0, this.fuel - CAR.fuelBurn * (0.25 + 0.75 * throttle) * av2 * dt / 1000);
+    this.massT -= dt;
+    if (this.massT <= 0 && Math.abs(this.fuel - this.appliedFuel) > 0.25) {
+      this.massT = 0.5;
+      this.appliedFuel = this.fuel;
+      b.setAdditionalMass(this.fuel, true);
+    }
+    // engine heat model is tuned on the 9,200 rpm stock engine: scale load by this engine's redline
+    if (this.damage.tick(dt, rpm * (9200 / CAR.redline), speed)) this.pendingExplode = true;
     const pv = b.linvel();
     this.preVel.set(pv.x, pv.y, pv.z);
   }
@@ -414,7 +501,7 @@ export class Car {
    */
   collisionImpulse(dt: number): THREE.Vector3 {
     const v = this.body.linvel();
-    return new THREE.Vector3(v.x - this.preVel.x, v.y - this.preVel.y + 9.81 * dt, v.z - this.preVel.z - 0).multiplyScalar(this.spec.mass);
+    return new THREE.Vector3(v.x - this.preVel.x, v.y - this.preVel.y + 9.81 * dt, v.z - this.preVel.z - 0).multiplyScalar(this.mass);
   }
 
   /** Set by damage when a burning car should blow up; the session consumes it. */
@@ -493,6 +580,7 @@ export class Car {
     for (const [name, st] of Object.entries(this.damage.parts)) if (st === 'loose') wobble(v.parts[name as keyof typeof v.parts], this.visT, Math.abs(this.telemetry.speed));
     this.flapAngle += ((this.flapsOpen ? 1.1 : 0) - this.flapAngle) * Math.min(1, dt * 12);
     v.flaps.forEach((f) => (f.rotation.x = -this.flapAngle));
+    if (v.drsFlap) v.drsFlap.rotation.x += ((this.drsOpen ? -0.25 : 0.45) - v.drsFlap.rotation.x) * Math.min(1, dt * 14);
     v.wiper.visible = this.wiperOn;
     if (this.wiperOn) v.wiper.rotation.z = (Math.sin(this.visT * 3.2) * 0.5 + 0.5) * 1.6;
     for (let i = 0; i < 4; i++) {

@@ -36,6 +36,8 @@ export interface CarVisual {
   comHeight: number;
   /** Where damage smoke and fire come from (model frame). */
   engineBay: THREE.Vector3;
+  /** Rear-wing flap that opens with the drag-reduction system (open-wheel cars). */
+  drsFlap?: THREE.Object3D;
 }
 
 function liveryTexture(primary: string, secondary: string, pattern: number): THREE.CanvasTexture {

@@ -102,6 +102,8 @@ export class RemoteCar {
     v.taillights.emissiveIntensity = s.brake > 0.05 ? 3 : 0.15;
     this.flap += ((s.flaps ? 1.1 : 0) - this.flap) * Math.min(1, dt * 12);
     v.flaps.forEach((f) => (f.rotation.x = -this.flap));
+    // on open-wheelers the flap bit carries the drag-reduction flap
+    if (v.drsFlap) v.drsFlap.rotation.x += ((s.flaps ? -0.25 : 0.45) - v.drsFlap.rotation.x) * Math.min(1, dt * 14);
     v.wiper.visible = s.wiper;
     if (s.exploded && !this.charred) this.char();
     // parts missing in the state but still attached (e.g. a lost detach event): just hide them

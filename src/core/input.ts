@@ -5,6 +5,10 @@ export interface DriverInput {
   brake: number; // 0..1
   shiftUp: boolean; // edge-triggered
   shiftDown: boolean; // edge-triggered
+  /** Open the drag-reduction flap (only works inside a zone when eligible). */
+  drs?: boolean;
+  /** Deploy the energy boost (held). */
+  boost?: boolean;
 }
 
 const keys = new Set<string>();
@@ -84,6 +88,8 @@ export function readDriverInput(dt: number, speed: number): DriverInput {
   let brake = isDown('KeyS') || isDown('ArrowDown') ? 1 : 0;
   let shiftUp = wasPressed('KeyE');
   let shiftDown = wasPressed('KeyQ');
+  let drs = wasPressed('KeyF');
+  let boost = isDown('ShiftLeft') || isDown('ShiftRight');
 
   const pad = navigator.getGamepads?.().find((p) => p && p.connected);
   if (pad) {
@@ -96,10 +102,12 @@ export function readDriverInput(dt: number, speed: number): DriverInput {
     const b = pad.buttons.map((x) => x.pressed);
     if (b[5] && !prevPadButtons[5]) shiftUp = true;
     if (b[4] && !prevPadButtons[4]) shiftDown = true;
+    if (b[0] && !prevPadButtons[0]) drs = true; // A: drag flap
+    if (b[1]) boost = true; // B: hold for boost
     if (b[3] && !prevPadButtons[3]) pressed.add('KeyC'); // Y: camera
     padResetHeld = !!b[2]; // X: hold to reset
     if (b[9] && !prevPadButtons[9]) pressed.add('Escape'); // Start: pause
     prevPadButtons = b;
   }
-  return { steer, throttle, brake, shiftUp, shiftDown };
+  return { steer, throttle, brake, shiftUp, shiftDown, drs, boost };
 }

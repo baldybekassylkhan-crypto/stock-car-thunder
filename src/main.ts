@@ -89,7 +89,7 @@ function buildGrid(r: Room): GridEntry[] {
   const series = r.settings.series;
   // a forced car (if valid for the series) overrides everyone's pick
   const forced = r.settings.sameCar && carSpec(r.settings.sameCar).id === r.settings.sameCar && carSpec(r.settings.sameCar).series === series ? r.settings.sameCar : '';
-  const humans = r.humans.map((p) => ({ slot: p.slot, nickname: p.nickname, number: p.number, color: p.color, bot: false, car: forced || carSpec(p.cars?.[series], series).id }));
+  const humans = r.humans.map((p) => ({ slot: p.slot, nickname: p.nickname, number: p.number, color: p.color, bot: false, car: forced || carSpec(p.cars?.[series], series).id, tyre: p.tyre ?? 'medium' as const }));
   const pool = carsOf(series);
   const used = new Set(humans.map((h) => h.slot));
   const bots: GridEntry[] = [];
@@ -104,7 +104,7 @@ function buildGrid(r: Room): GridEntry[] {
     while (used.has(slot)) slot++;
     used.add(slot);
     // AI drivers: an even mix of the series' cars, shuffled by slot
-    bots.push({ slot, nickname: BOT_NAMES[i % BOT_NAMES.length], number: numbers[i], color: BOT_COLORS[i % BOT_COLORS.length], bot: true, car: forced || pool[(i * 7 + slot * 3) % pool.length].id });
+    bots.push({ slot, nickname: BOT_NAMES[i % BOT_NAMES.length], number: numbers[i], color: BOT_COLORS[i % BOT_COLORS.length], bot: true, car: forced || pool[(i * 7 + slot * 3) % pool.length].id, tyre: (['medium', 'soft', 'hard', 'medium'] as const)[i % 4] });
   }
   const all = [...humans, ...bots];
   for (let i = all.length - 1; i > 0; i--) {

@@ -7,6 +7,7 @@ import type { GridEntry } from '../core/session';
 import { fmtTime } from '../core/progress';
 import { carSpec, carsOf, carStats, SERIES_LABEL, type Series } from '../vehicle/catalog';
 import { CarPreview } from './carPreview';
+import { COMPOUNDS } from '../vehicle/tyres';
 
 const ui = () => document.getElementById('ui')!;
 
@@ -186,6 +187,10 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
               <div class="note" id="carblurb"></div>
               <div class="carpick-bars" id="carbars"></div>
               <div class="note" id="carfacts"></div>
+              <div class="tyrepick" id="tyrepick">
+                <span>Start tyres</span>
+                ${(['soft', 'medium', 'hard'] as const).map((t) => `<button class="btn ghost tyre-btn" data-tyre="${t}" title="${COMPOUNDS[t].label}"><b style="border-color:${COMPOUNDS[t].color}">${COMPOUNDS[t].tag}</b>${COMPOUNDS[t].label}</button>`).join('')}
+              </div>
             </div>
           </div>
       <div class="row" style="margin-top:16px">
@@ -227,14 +232,24 @@ export function lobbyScreen(room: Room, h: LobbyHandlers) {
     $('#carfacts')!.textContent = `≈ ${Math.round(st.topSpeed * (kmh ? 3.6 : 2.237))} ${kmh ? 'km/h' : 'mph'} top speed · ${Math.round(st.power * 1.341)} hp · ${spec.mass} kg · ${spec.gears.length}-speed`;
     $<HTMLButtonElement>('#carprev')!.disabled = $<HTMLButtonElement>('#carnext')!.disabled = forced;
     preview.setCar(spec, profile.color, profile.carNumber);
+    // GP cars choose a starting compound (in the rain everyone starts on intermediates)
+    const tp = $('#tyrepick')!;
+    tp.style.display = spec.series === 'gp' ? '' : 'none';
+    tp.querySelectorAll<HTMLButtonElement>('.tyre-btn').forEach((b) => b.classList.toggle('sel', b.dataset.tyre === profile.tyre));
   };
+  root.querySelectorAll<HTMLButtonElement>('.tyre-btn').forEach((b) => b.addEventListener('click', () => {
+    profile.tyre = b.dataset.tyre as typeof profile.tyre;
+    saveProfile();
+    room.setCars(profile.cars, profile.tyre);
+    render();
+  }));
   const stepCar = (dir: number) => {
     const s = room.settings;
     const list = carsOf(s.series);
     const i = list.findIndex((c) => c.id === carSpec(profile.cars[s.series], s.series).id);
     profile.cars[s.series] = list[(i + dir + list.length) % list.length].id;
     saveProfile();
-    room.setCars(profile.cars);
+    room.setCars(profile.cars, profile.tyre);
     render();
   };
   $('#carprev')!.addEventListener('click', () => stepCar(-1));
@@ -343,10 +358,10 @@ export function resultsScreen(rows: ResultRow[], grid: GridEntry[], isHost: bool
       <h2>Race results</h2>
       ${winner ? `<p class="tag">🏁 Winner: <b>${esc(name(winner.slot)?.nickname ?? '?')}</b></p>` : ''}
       <div class="results-wrap"><table class="results">
-        <tr><th>Pos</th><th>Car</th><th>Driver</th><th>Laps</th><th>Best lap</th><th>Time</th><th>Status</th></tr>
+        <tr><th>Pos</th><th>Car</th><th>Driver</th><th>Laps</th><th>Best lap</th><th>Time</th><th>Pen.</th><th>Status</th></tr>
         ${rows.map((r) => {
           const g = name(r.slot);
-          return `<tr><td>${r.pos}</td><td><span class="num" style="background:${esc(g?.color ?? '#555')}">${g?.number ?? ''}</span></td><td>${esc(g?.nickname ?? '?')}${g?.bot ? ' <small>AI</small>' : ''}</td><td>${r.laps}</td><td>${fmtTime(r.best)}</td><td>${r.status === 1 ? fmtTime(r.total) : '—'}</td><td>${r.status === 1 ? 'Finished' : r.status === 2 ? 'DNF' : 'Running'}</td></tr>`;
+          return `<tr><td>${r.pos}</td><td><span class="num" style="background:${esc(g?.color ?? '#555')}">${g?.number ?? ''}</span></td><td>${esc(g?.nickname ?? '?')}${g?.bot ? ' <small>AI</small>' : ''}</td><td>${r.laps}</td><td>${fmtTime(r.best)}</td><td>${r.status === 1 ? fmtTime(r.total + (r.pen ?? 0)) : '—'}</td><td>${r.pen ? `+${r.pen}s` : ''}</td><td>${r.status === 1 ? 'Finished' : r.status === 2 ? 'DNF' : 'Running'}</td></tr>`;
         }).join('')}
       </table></div>
       <div class="row" style="margin-top:16px">
@@ -380,6 +395,9 @@ export function garageScreen(back: () => void, onChange?: () => void) {
           </div>
           <div class="row">
             <div><label>ABS</label><select id="abs"><option value="1">On</option><option value="0">Off</option></select></div>
+            <div><label>Racing line</label><select id="line"><option value="0">Off</option><option value="1">On</option></select></div>
+          </div>
+          <div class="row">
             <div><label>Volume</label><select id="vol">${[0, 0.25, 0.5, 0.7, 1].map((v) => `<option value="${v}">${Math.round(v * 100)}%</option>`).join('')}</select></div>
           </div>
         </div>
@@ -392,6 +410,7 @@ export function garageScreen(back: () => void, onChange?: () => void) {
   $<HTMLSelectElement>('#gears').value = settings.manualGears ? 'manual' : 'auto';
   $<HTMLSelectElement>('#tc').value = settings.tractionControl ? '1' : '0';
   $<HTMLSelectElement>('#abs').value = settings.abs ? '1' : '0';
+  $<HTMLSelectElement>('#line').value = settings.racingLine ? '1' : '0';
   $<HTMLSelectElement>('#vol').value = String(settings.volume);
   root.querySelectorAll<HTMLButtonElement>('.swatch').forEach((b) => b.addEventListener('click', () => {
     profile.color = b.dataset.c!;
@@ -405,6 +424,7 @@ export function garageScreen(back: () => void, onChange?: () => void) {
     settings.manualGears = $<HTMLSelectElement>('#gears').value === 'manual';
     settings.tractionControl = $<HTMLSelectElement>('#tc').value === '1';
     settings.abs = $<HTMLSelectElement>('#abs').value === '1';
+    settings.racingLine = $<HTMLSelectElement>('#line').value === '1';
     settings.volume = Number($<HTMLSelectElement>('#vol').value);
     saveProfile();
     saveSettings();

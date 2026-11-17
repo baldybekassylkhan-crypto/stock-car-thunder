@@ -74,6 +74,16 @@ export interface CarSpec {
   fuelBurn: number;
   /** Tyre wear multiplier (1 = average for the series). */
   tyreWear: number;
+  /** Tyre temperature (°C) at the start and after a stop (GP cars use tyre blankets). */
+  tyreStartTemp: number;
+  /** Carbon brakes: weak until they are hot. */
+  carbonBrakes: boolean;
+  /** Share of front downforce lost when following right behind another car ("dirty air"). */
+  wakeLoss: number;
+  /** Drag-reduction flap on the rear wing: drag and rear-downforce multipliers while open. */
+  drs: { drag: number; rear: number } | null;
+  /** Energy boost: electric power (W) and battery size (J). Charges under braking. */
+  ers: { power: number; capacity: number } | null;
 
   damage: DamageProfile;
 }
@@ -120,6 +130,11 @@ const STOCK_BASE = {
   fuelTank: 64,
   fuelBurn: 0.42,
   tyreWear: 1,
+  tyreStartTemp: 45,
+  carbonBrakes: false,
+  wakeLoss: 0.08,
+  drs: null,
+  ers: null,
   damage: DAMAGE_PROFILES.stock,
 };
 
@@ -170,6 +185,11 @@ const GP_BASE = {
   fuelTank: 105,
   fuelBurn: 0.55,
   tyreWear: 1,
+  tyreStartTemp: 72,
+  carbonBrakes: true,
+  wakeLoss: 0.3,
+  drs: { drag: 0.78, rear: 0.65 },
+  ers: { power: 120000, capacity: 4e6 },
   damage: DAMAGE_PROFILES.openWheel,
 };
 
@@ -211,6 +231,7 @@ export const CARS: CarSpec[] = [
     dragCdA: 0.9,
     liftClA: 0.82,
     aeroFront: 0.45,
+    wakeLoss: 0.2,
     finalDrive: 3.5,
     tyreWear: 0.95,
     fuelBurn: 0.4,

@@ -4,6 +4,10 @@ import { Renderer } from '../render/renderer';
 import { PhysicsWorld, initPhysics, RAPIER, RAY_TRACK_ONLY } from '../physics/world';
 import { Car, type CarContact } from '../vehicle/car';
 import { carSpec, PART_LABEL, type CarSpec } from '../vehicle/catalog';
+import { COMPOUNDS } from '../vehicle/tyres';
+import { RaceAids, type AidCar } from '../race/aids';
+import type { Compound } from '../vehicle/tyres';
+import { RacingLine } from '../render/racingLine';
 import { RemoteCar } from '../vehicle/remoteCar';
 import { BotDriver, type Traffic } from '../vehicle/bot';
 import { CameraRig, CAM_LABEL } from '../render/cameras';
@@ -29,6 +33,8 @@ export interface GridEntry {
   bot: boolean;
   /** Car id from the catalogue (catalog.ts). */
   car: string;
+  /** Starting tyre compound (GP cars; stock cars run their one compound). */
+  tyre?: Compound;
 }
 
 export interface SessionCallbacks {
@@ -58,7 +64,7 @@ export class Session {
   private remotes = new Map<number, RemoteCar>();
   private carColliders = new Set<number>();
   private director: RaceDirector | null = null;
-  private race: RaceSnapshot = { phase: 'loading', flag: 'none', cd: 0, laps: 0, leaderLap: 0, st: [] };
+  private race: RaceSnapshot = { phase: 'loading', flag: 'none', cd: 0, laps: 0, leaderLap: 0, st: [], yellow: [], drs: false, sc: '' };
   private rig!: CameraRig;
   private hud: Hud;
   private effects = new Effects();
@@ -92,6 +98,12 @@ export class Session {
   private fireworksT = 0;
   private resultsSent = false;
   private emitAcc = new Map<string, number>();
+  private aids: RaceAids | null = null;
+  private blueFlag = false;
+  private localYellow = false;
+  /** Last time each car was blamed for a collision (penalty cooldown). */
+  private blameT = new Map<number, number>();
+  private racingLine: RacingLine | null = null;
   private readonly isHost: boolean;
   private readonly self: number;
 
@@ -134,10 +146,11 @@ export class Session {
       const pl = tr.placement(gp.i, gp.d, 0.62);
       const opts = { number: g.number, color: g.color, seed: g.number + g.slot * 7 };
       const spec = carSpec(g.car);
+      const tyre = this.startCompound(g, spec);
       if (g.slot === this.self) {
-        this.car = this.makeCar(opts, pl.pos, pl.quat, spec);
+        this.car = this.makeCar(opts, pl.pos, pl.quat, spec, tyre);
       } else if (g.bot && this.isHost) {
-        const car = this.makeCar(opts, pl.pos, pl.quat, spec);
+        const car = this.makeCar(opts, pl.pos, pl.quat, spec, tyre);
         const skill = 0.9 + ((g.slot * 37) % 10) / 100;
         this.bots.set(g.slot, { car, ai: new BotDriver(car, tr, skill, this.map.oval, g.slot), input: { steer: 0, throttle: 0, brake: 0, shiftUp: false, shiftDown: false }, penalty: 0, limit: 0 });
       } else {
@@ -158,9 +171,11 @@ export class Session {
         speed: () => this.speedOf(g.slot),
         destroyed: () => this.destroyedOf(g.slot),
       }));
-      this.director = new RaceDirector(tr, this.cfg.laps, entrants, (slot) => gridPos(slot).i, this.map.paceSpeed);
+      this.director = new RaceDirector(tr, this.cfg.laps, entrants, (slot) => gridPos(slot).i, this.map.paceSpeed, this.cfg.series);
     }
 
+    this.aids = new RaceAids(tr, !this.map.oval, this.grid.some((g) => !!carSpec(g.car).drs));
+    if (settings.racingLine) { this.racingLine = new RacingLine(this.car, tr, this.map.oval); this.r.scene.add(this.racingLine.mesh); }
     this.rig = new CameraRig(this.r.camera, this.map.tvCams);
     const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 });
     this.rig.occlusion = (from, dir, max) => {
@@ -191,8 +206,26 @@ export class Session {
     }
   }
 
-  private makeCar(opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, spec: CarSpec) {
-    const car = new Car(this.physics, opts, pos, quat, this.cfg.damage, spec);
+  /** Starting tyres: GP cars run the driver's pick in the dry and intermediates in the rain. */
+  private startCompound(g: GridEntry, spec: CarSpec): Compound {
+    if (spec.series !== 'gp') return 'stock';
+    if (this.map.rain) return 'inter';
+    return g.tyre && ['soft', 'medium', 'hard'].includes(g.tyre) ? g.tyre : 'medium';
+  }
+
+  /** Fuel for the race distance (GP cars can't refuel; stock cars start full and refuel at stops). */
+  private startFuel(spec: CarSpec) {
+    if (spec.series !== 'gp') return spec.fuelTank;
+    if (!this.cfg.laps) return spec.fuelTank * 0.5;
+    const need = this.cfg.laps * (this.map.track.length / 1000) * spec.fuelBurn * 0.85 + 2.5;
+    return Math.min(spec.fuelTank, need);
+  }
+
+  private makeCar(opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, spec: CarSpec, tyre?: Compound) {
+    const car = new Car(this.physics, opts, pos, quat, this.cfg.damage, spec, tyre);
+    car.wetTrack = this.map.rain;
+    car.ambient = this.map.rain ? 15 : this.map.atmosphere.mode === 'night' ? 20 : 28;
+    car.fuel = this.startFuel(spec);
     car.gripScale = this.map.gripScale;
     car.wiperOn = this.map.rain;
     this.carColliders.add(car.collider.handle);
@@ -252,6 +285,10 @@ export class Session {
         break;
       case 'race':
         if (!this.isHost) this.applyRace(p as RaceSnapshot);
+        break;
+      case 'pen':
+        // a client reports a penalty for its own car (track limits, causing a collision)
+        if (this.isHost && p.s === from && this.director) this.director.addPenalty(from, Math.min(10, Number(p.sec) || 5), String(p.why).slice(0, 40), this.entry(from)?.nickname ?? '?');
         break;
       case 'results':
         if (!this.isHost) this.cb.onResults(p.rows as ResultRow[], this.grid);
@@ -369,7 +406,7 @@ export class Session {
     this.physics.world.removeRigidBody(old.body);
     this.r.scene.remove(old.visual.root);
     const g = this.entry(this.self)!;
-    this.car = this.makeCar({ number: g.number, color: g.color, seed: g.number + g.slot * 7 }, pl.pos, pl.quat, carSpec(g.car));
+    this.car = this.makeCar({ number: g.number, color: g.color, seed: g.number + g.slot * 7 }, pl.pos, pl.quat, carSpec(g.car), this.startCompound(g, carSpec(g.car)));
     this.applyAssists();
     this.spectating = -1;
     this.destroyedAt = -1;
@@ -407,6 +444,7 @@ export class Session {
       local = best.local.clone();
       world = best.world.clone();
       carHit = this.carColliders.has(best.other.handle);
+      if (carHit && J > 5000 && local.z > car.spec.geo.wheelbaseF - 0.4) this.checkBlame(slot, car, best.other.handle);
     } else {
       const d = inwardLocal.clone().negate();
       const k = 1 / Math.max(Math.abs(d.x) / 0.98, Math.abs(d.y) / 0.6, Math.abs(d.z) / 2.6);
@@ -572,7 +610,7 @@ export class Session {
         rpm: car.telemetry.rpm,
         throttle: car.telemetry.throttle,
         brake: car.telemetry.brake,
-        flaps: car.flapsOpen,
+        flaps: car.flapsOpen || car.drsOpen,
         destroyed: car.damage.destroyed || car.damage.engineWear >= 1,
         exploded: car.damage.exploded,
         wiper: car.wiperOn,
@@ -658,6 +696,7 @@ export class Session {
     this.car.speedLimit = this.carLimit;
     this.driveBots(dt, limit);
     this.computeDraft();
+    this.updateAids(dt);
 
     // ---------------- physics ----------------
     const DT = PhysicsWorld.DT;
@@ -763,7 +802,48 @@ export class Session {
       this.audio.scrape(this.scrapeLevel);
     }
     this.updateSpotter();
+    this.racingLine?.update(this.progress.index);
     if (interactive) this.updateHud(tm);
+  }
+
+  /** Drag-flap zones, track limits, blue and local yellow flags for the cars this peer runs. */
+  private updateAids(dt: number) {
+    if (!this.aids) return;
+    const cars: AidCar[] = this.grid
+      .filter((g) => !this.destroyedOf(g.slot) && (this.carOf(g.slot) || this.remotes.has(g.slot)))
+      .map((g) => ({ slot: g.slot, pos: this.posOf(g.slot).clone(), speed: Math.abs(this.speedOf(g.slot)), car: this.carOf(g.slot) }));
+    this.aids.update(dt, cars, this.race,
+      (slot, n) => { if (slot === this.self) this.flash(`TRACK LIMITS — WARNING ${n}/3`, 2.2, '#f5f5f5'); },
+      (slot, sec, why) => this.givePenalty(slot, sec, why));
+    for (const [slot, b] of this.bots) b.ai.blue = this.aids.blue.has(slot);
+    if (this.aids.blue.has(this.self) && !this.blueFlag) this.flash('BLUE FLAG — LET THE FASTER CAR BY', 2, '#60a5fa');
+    this.blueFlag = this.aids.blue.has(this.self);
+    this.localYellow = this.aids.yellow.has(this.self);
+    if (this.car.drsAllowed && this.car.telemetry.drs === 0 && !this.car.drsOpen) this.flash('DRS — PRESS F', 1.2, '#3ad17a');
+  }
+
+  /** Time penalty for one of our cars: the host applies it, clients report their own. */
+  private givePenalty(slot: number, sec: number, why: string) {
+    if (this.cfg.laps === 0) return;
+    if (this.isHost && this.director) this.director.addPenalty(slot, sec, why, this.entry(slot)?.nickname ?? '?');
+    else if (slot === this.self) this.room.sendEvent('pen', { s: slot, sec, why });
+    if (slot === this.self && !this.isHost) this.flash(`${sec} SEC PENALTY — ${why.toUpperCase()}`, 3, '#ff6b6b');
+  }
+
+  /** GP: running into the back of the car ahead hard is a 5 s penalty. */
+  private checkBlame(slot: number, car: Car, otherHandle: number) {
+    if (this.cfg.series !== 'gp' || this.race.phase !== 'green' || this.time - (this.blameT.get(slot) ?? -99) < 6) return;
+    let other: THREE.Vector3 | null = null;
+    if (this.car.collider.handle === otherHandle) other = this.car.position.clone();
+    for (const b of this.bots.values()) if (b.car.collider.handle === otherHandle) other = b.car.position.clone();
+    for (const rc of this.remotes.values()) if (rc.collider.handle === otherHandle) other = rc.pos.clone();
+    if (!other) return;
+    const r = car.body.rotation();
+    const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
+    const dir = other.sub(car.position);
+    if (dir.dot(fwd) < 0.6 * dir.length()) return; // not the car in front of us
+    this.blameT.set(slot, this.time);
+    this.givePenalty(slot, 5, 'causing a collision');
   }
 
   private trafficHint = new Map<number, number>();
@@ -823,15 +903,40 @@ export class Session {
       for (const o of cars) {
         const rel = o.pos.clone().sub(p);
         const along = rel.dot(fwd);
-        if (along < 3 || along > 35) continue;
+        const reach = car.spec.series === 'gp' ? 55 : 35;
+        if (along < 3 || along > reach) continue;
         const lat = rel.clone().addScaledVector(fwd, -along).length();
         if (lat > 2.2) continue;
-        d += 0.3 * (1 - along / 35) * (1 - lat / 2.2);
+        d += 0.3 * (1 - along / reach) * (1 - lat / 2.2);
       }
       return Math.min(0.38, d);
     };
+    // turbulent wake: within ~1.5 s behind another car the front wing loses downforce
+    const wakeFor = (car: Car) => {
+      const p = car.position;
+      const v = car.body.linvel();
+      const vel = new THREE.Vector3(v.x, v.y, v.z);
+      const sp = vel.length();
+      if (sp < 20) return 0;
+      const fwd = vel.divideScalar(sp);
+      const reach = Math.max(15, sp * 1.5);
+      let w = 0;
+      for (const o of cars) {
+        const rel = o.pos.clone().sub(p);
+        const along = rel.dot(fwd);
+        if (along < 2 || along > reach) continue;
+        const lat = rel.clone().addScaledVector(fwd, -along).length();
+        if (lat > 3) continue;
+        w = Math.max(w, (1 - along / reach) * (1 - lat / 3));
+      }
+      return w;
+    };
     this.car.draft += (draftFor(this.car) - this.car.draft) * 0.2;
-    for (const b of this.bots.values()) b.car.draft += (draftFor(b.car) - b.car.draft) * 0.2;
+    this.car.wake += (wakeFor(this.car) - this.car.wake) * 0.15;
+    for (const b of this.bots.values()) {
+      b.car.draft += (draftFor(b.car) - b.car.draft) * 0.2;
+      b.car.wake += (wakeFor(b.car) - b.car.wake) * 0.15;
+    }
   }
 
   private nextSpectate() {
@@ -885,7 +990,9 @@ export class Session {
     if (this.resetHold > 0.15) status = `KEEP HOLDING R — ${dmg.destroyed && !this.cfg.laps ? 'NEW CAR' : 'RESET'} IN ${Math.max(0, RESET_HOLD - this.resetHold).toFixed(1)}s`;
     else if (dmg.destroyed) status = this.spectating >= 0 ? `DESTROYED — SPECTATING ${this.entry(this.spectating)?.nickname ?? ''} (C: next)` : this.cfg.laps ? 'DESTROYED — DNF' : 'DESTROYED — HOLD R FOR A NEW CAR';
     else if (this.race.phase === 'pace') status = 'PACE LAP — HOLD POSITION';
-    else if (this.race.phase === 'caution') status = 'CAUTION — SLOW DOWN';
+    else if (this.race.phase === 'caution') status = this.race.sc === 'vsc' ? 'VIRTUAL SAFETY CAR — KEEP TO THE LIMIT' : this.race.sc === 'sc' ? 'SAFETY CAR — NO OVERTAKING' : 'CAUTION — SLOW DOWN';
+    else if (this.localYellow) status = 'YELLOW FLAG — SLOW, NO OVERTAKING';
+    else if (this.car.fuel <= 0) status = 'OUT OF FUEL';
     else if (this.race.phase === 'loading') status = 'WAITING FOR DRIVERS…';
     else if (dmg.fire > 0) status = 'ON FIRE!';
     else if (dmg.engineWear >= 1) status = 'ENGINE BLOWN';
@@ -909,6 +1016,12 @@ export class Session {
       draft: this.car.draft,
       spotter: this.spotter,
       penalty: Math.max(0, this.penalty),
+      timePenalty: mine?.pen ?? 0,
+      blue: this.blueFlag,
+      localYellow: this.localYellow && this.race.flag === 'green',
+      tyres: { temp: this.car.tyres.temp, wear: this.car.tyres.wear, compound: this.car.tyres.compound, window: COMPOUNDS[this.car.tyres.compound].window },
+      fuel: this.car.fuel,
+      fuelLaps: this.car.fuel / Math.max(0.01, this.car.spec.fuelBurn * 0.8 * (this.map.track.length / 1000)),
       status,
       markers,
       debug: this.debug
@@ -916,6 +1029,7 @@ export class Session {
           `speed ${(tm.speed * 2.23694).toFixed(1)} mph  gear ${tm.gear}  rpm ${tm.rpm.toFixed(0)}  draft ${this.car.draft.toFixed(2)}\n` +
           `engine ${(dmg.engine * 100).toFixed(0)}%  temp ${dmg.engineTemp.toFixed(0)}°C  integrity ${(dmg.integrity * 100).toFixed(0)}%  fire ${dmg.fire.toFixed(2)}\n` +
           `phase ${this.race.phase}  flag ${this.race.flag}  remotes ${this.remotes.size}  bots ${this.bots.size}\n` +
+          `tyres ${this.car.tyres.compound} ${this.car.tyres.temp.map((t) => t.toFixed(0)).join('/')}°C wear ${this.car.tyres.wear.map((w) => (w * 100).toFixed(0)).join('/')}%  brakes ${this.car.brakeTemp.toFixed(0)}°C  wake ${this.car.wake.toFixed(2)}  fuel ${this.car.fuel.toFixed(1)} kg\n` +
           `draw calls ${this.r.renderer.info.render.calls}  tris ${(this.r.renderer.info.render.triangles / 1000).toFixed(0)}k  quality ${settings.quality}`
         : null,
     });
@@ -929,6 +1043,7 @@ export class Session {
     this.audio?.dispose();
     this.hud.show(false);
     if (this.map) this.r.scene.remove(this.map.group);
+    if (this.racingLine) { this.r.scene.remove(this.racingLine.mesh); this.racingLine.dispose(); }
     this.r.scene.remove(this.effects.group);
     if (this.car) this.r.scene.remove(this.car.visual.root);
     for (const b of this.bots.values()) this.r.scene.remove(b.car.visual.root);

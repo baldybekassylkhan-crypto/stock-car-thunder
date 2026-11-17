@@ -28,11 +28,16 @@ export interface Player {
   bot?: boolean;
   /** Picked car per series (car ids); the room's series decides which one races. */
   cars: Record<Series, string>;
+  /** Starting tyre for dry GP races. */
+  tyre?: DryTyre;
 }
 
+export type DryTyre = 'soft' | 'medium' | 'hard';
+const cleanTyre = (t: unknown): DryTyre => (t === 'soft' || t === 'hard' ? t : 'medium');
+
 type Msg =
-  | { t: 'hello'; nickname: string; number: number; color: string; cars: Record<Series, string> }
-  | { t: 'car'; cars: Record<Series, string> }
+  | { t: 'hello'; nickname: string; number: number; color: string; cars: Record<Series, string>; tyre?: DryTyre }
+  | { t: 'car'; cars: Record<Series, string>; tyre?: DryTyre }
   | { t: 'welcome'; slot: number; players: Player[]; settings: RoomSettings; inRace: boolean }
   | { t: 'reject'; reason: string }
   | { t: 'lobby'; players: Player[]; settings: RoomSettings }
@@ -118,14 +123,14 @@ export class Room {
 
   static offline(profile: Profile, settings: RoomSettings): Room {
     const r = new Room('', true, true, settings);
-    r.players = [{ slot: 0, nickname: profile.nickname, number: profile.carNumber, color: profile.color, ready: true, isHost: true, ping: 0, cars: { ...profile.cars } }];
+    r.players = [{ slot: 0, nickname: profile.nickname, number: profile.carNumber, color: profile.color, ready: true, isHost: true, ping: 0, cars: { ...profile.cars }, tyre: profile.tyre }];
     return r;
   }
 
   static host(profile: Profile, code: string, settings: RoomSettings): Promise<Room> {
     return new Promise((resolve, reject) => {
       const r = new Room(code, true, false, settings);
-      r.players = [{ slot: 0, nickname: profile.nickname, number: profile.carNumber, color: profile.color, ready: true, isHost: true, ping: 0, cars: { ...profile.cars } }];
+      r.players = [{ slot: 0, nickname: profile.nickname, number: profile.carNumber, color: profile.color, ready: true, isHost: true, ping: 0, cars: { ...profile.cars }, tyre: profile.tyre }];
       const peer = new Peer(peerIdForRoom(code), PEER_OPTS);
       r.peer = peer;
       const timeout = setTimeout(() => { peer.destroy(); reject(new Error('Could not reach the matchmaking server. Check your connection.')); }, 15000);
@@ -171,7 +176,7 @@ export class Room {
         r.hostEv = ev;
         r.hostSt = st;
         st.on('data', (d) => { if (d instanceof ArrayBuffer) for (const b of splitPacket(d)) r.onState(b); });
-        ev.on('open', () => ev.send({ t: 'hello', nickname: profile.nickname, number: profile.carNumber, color: profile.color, cars: { ...profile.cars } } satisfies Msg));
+        ev.on('open', () => ev.send({ t: 'hello', nickname: profile.nickname, number: profile.carNumber, color: profile.color, cars: { ...profile.cars }, tyre: profile.tyre } satisfies Msg));
         ev.on('data', (raw) => {
           const m = raw as Msg;
           if (m.t === 'welcome') {
@@ -218,7 +223,7 @@ export class Room {
         let slot = 1;
         while (used.has(slot)) slot++;
         this.links.set(conn.peer, { slot, ev: conn, st: this.pendingSt.get(conn.peer), sent: new Map() });
-        this.players.push({ slot, nickname: String(m.nickname).slice(0, 16), number: Number(m.number) | 0, color: String(m.color), ready: false, isHost: false, ping: 0, cars: cleanCars(m.cars) });
+        this.players.push({ slot, nickname: String(m.nickname).slice(0, 16), number: Number(m.number) | 0, color: String(m.color), ready: false, isHost: false, ping: 0, cars: cleanCars(m.cars), tyre: cleanTyre(m.tyre) });
         conn.send({ t: 'welcome', slot, players: this.players, settings: this.settings, inRace: this.inRace } satisfies Msg);
         this.pushLobby();
         this.onChat(-1, `${m.nickname} joined`);
@@ -234,7 +239,7 @@ export class Room {
         }
         case 'car': {
           const p = this.players.find((x) => x.slot === link.slot);
-          if (p) p.cars = cleanCars(m.cars);
+          if (p) { p.cars = cleanCars(m.cars); p.tyre = cleanTyre(m.tyre); }
           this.pushLobby();
           break;
         }
@@ -324,11 +329,11 @@ export class Room {
   }
 
   /** Change this player's car picks (host applies them, clients ask the host). */
-  setCars(cars: Record<Series, string>) {
+  setCars(cars: Record<Series, string>, tyre?: DryTyre) {
     const me = this.self;
-    if (me) me.cars = { ...cars };
+    if (me) { me.cars = { ...cars }; me.tyre = tyre ?? me.tyre; }
     if (this.isHost) this.pushLobby();
-    else this.hostEv?.send({ t: 'car', cars: { ...cars } } satisfies Msg);
+    else this.hostEv?.send({ t: 'car', cars: { ...cars }, tyre: tyre ?? me?.tyre } satisfies Msg);
   }
 
   chat(text: string) {

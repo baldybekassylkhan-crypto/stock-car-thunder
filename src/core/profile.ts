@@ -9,6 +9,8 @@ export interface Profile {
   color: string;
   /** Picked car per series. */
   cars: Record<Series, string>;
+  /** Starting tyre for GP races (dry). */
+  tyre: 'soft' | 'medium' | 'hard';
 }
 
 export interface Settings {
@@ -17,6 +19,8 @@ export interface Settings {
   manualGears: boolean;
   tractionControl: boolean;
   abs: boolean;
+  /** Racing-line assist: a coloured guide line on the track. */
+  racingLine: boolean;
   volume: number;
 }
 
@@ -43,6 +47,7 @@ export const profile: Profile = load('sct.profile', {
   carNumber: 10 + Math.floor(Math.random() * 89),
   color: LIVERY_COLORS[Math.floor(Math.random() * LIVERY_COLORS.length)],
   cars: { ...DEFAULT_CAR },
+  tyre: 'medium',
 });
 // profiles saved before car choice existed (or with a removed car) get valid picks
 profile.cars = { ...DEFAULT_CAR, ...(profile.cars ?? {}) };
@@ -52,6 +57,7 @@ export const settings: Settings = load('sct.settings', {
   manualGears: false,
   tractionControl: true,
   abs: true,
+  racingLine: false,
   volume: 0.7,
 });
 
