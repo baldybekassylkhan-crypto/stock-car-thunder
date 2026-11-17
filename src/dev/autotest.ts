@@ -172,3 +172,20 @@ export function installQuickRace(getSession: () => Session | null) {
     return `${S.map.def?.id ?? map} ${S.cfg.damage} bots=${S.bots.size}`;
   };
 }
+
+/** `await __quickArena(bots, events, timeLimit)`: from the main menu, start a Demolition Arena match vs AI. */
+export function installQuickArena() {
+  (window as Any).__quickArena = async (bots = 7, events = 'off', timeLimit = 0) => {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    document.querySelector<HTMLElement>('#arena')?.click();
+    await wait(300);
+    document.querySelector<HTMLElement>('#asingle')?.click();
+    await wait(600);
+    const set = (id: string, v: string) => { const el = document.querySelector<HTMLSelectElement>(`#${id}`)!; el.value = v; el.dispatchEvent(new Event('change')); };
+    set('bots', String(bots)); set('events', events); set('time', String(timeLimit));
+    document.querySelector<HTMLElement>('#start')?.click();
+    const A = () => (window as Any).__a();
+    for (let i = 0; i < 80 && !(A()?.phase && A().phase !== 'loading'); i++) await wait(250);
+    return `${A()?.grid.length} cars, events: ${A()?.eventIds.join(',') || 'none'}`;
+  };
+}

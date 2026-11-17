@@ -525,6 +525,8 @@ export class Car {
 
   /** Velocity right before the physics step (after our own tire/aero impulses). */
   private preVel = new THREE.Vector3();
+  /** Velocity just before the last physics step, i.e. before any collision was resolved. */
+  get preStepVel() { return this.preVel.clone(); }
 
   /**
    * Collision impulse (N·s, world) received during the last physics step: the velocity change not

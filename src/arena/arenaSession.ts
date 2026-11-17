@@ -570,8 +570,9 @@ export class ArenaSession {
   private handleContacts(l: Local) {
     const car = l.car;
     const now = this.time;
-    const myVel = car.body.linvel();
-    const vMe = new THREE.Vector3(myVel.x, myVel.y, myVel.z);
+    // closing speeds must use velocities from BEFORE the step: afterwards the collision is
+    // already resolved and the cars are separating
+    const vMe = car.preStepVel;
     for (const c of car.contacts()) {
       const surface = this.physics.surfaces.get(c.other.handle);
       if (surface === 'dirt' || surface === 'grass') continue; // the floor
@@ -582,7 +583,7 @@ export class ArenaSession {
       if (c.slide > 3 && Math.random() < 0.5) this.effects.sparks(c.world, vMe, 3 + Math.min(10, c.slide * 0.3), 1);
       const key = `${l.slot}:${isCar ? other : 'w' + c.other.handle}`;
       if (now - (this.pairT.get(key) ?? -9) < PAIR_COOLDOWN) continue;
-      const vOther = isCar ? this.velOf(other) : new THREE.Vector3();
+      const vOther = isCar ? (this.locals.get(other)?.car.preStepVel ?? this.velOf(other)) : new THREE.Vector3();
       const closing = vOther.clone().sub(vMe).dot(c.normalWorld);
       if (closing < 2.5) continue;
       this.pairT.set(key, now);
@@ -815,7 +816,9 @@ export class ArenaSession {
         for (const [v, by] of this.pendingDmg) this.room.sendEvent('admg', { v, by });
         this.pendingDmg.clear();
       }
-    } else for (const l of this.locals.values()) { const i = this.info.get(l.slot); if (i && i.alive) i.hp = l.dmg.hp; }
+    }
+    // our own cars' health is always ours to report
+    for (const l of this.locals.values()) { const i = this.info.get(l.slot); if (i && i.alive) i.hp = l.dmg.hp; }
 
     // ---------------- camera, audio, hud ----------------
     this.updateCamera(dt, interactive);
