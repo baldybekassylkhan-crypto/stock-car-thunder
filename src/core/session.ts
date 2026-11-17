@@ -963,7 +963,7 @@ export class Session {
     const left = this.driftStart < 0 ? dur : dur - (this.time - this.driftStart);
     const speed = Math.abs(this.car.telemetry.speed);
     // a hard hit (sudden loss of speed) ends the combo
-    const crashed = dt > 0 && (this.prevSpeed - speed) / dt > 28;
+    const crashed = dt > 0 && (this.prevSpeed - speed) / dt > 38;
     this.prevSpeed = speed;
     const active = green && left > 0 && !this.spectator && !this.car.damage.destroyed && !this.driftEnded;
     this.driftScorer.update(dt, this.car.slipAngle, speed, crashed || this.car.damage.destroyed, active);

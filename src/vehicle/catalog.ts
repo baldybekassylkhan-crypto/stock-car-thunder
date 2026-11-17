@@ -237,7 +237,7 @@ const DRIFT_BASE = {
   tyreWear: 0.6,
   tyreStartTemp: 60,
   wakeLoss: 0,
-  drift: { rearGrip: 0.84, assist: 0.75 },
+  drift: { rearGrip: 0.8, assist: 0.85 },
 };
 
 export const CARS: CarSpec[] = [
@@ -336,7 +336,7 @@ export const CARS: CarSpec[] = [
     torque: scaleTorque(DRIFT_BASE.torque, (r) => (r < 4000 ? 0.82 : r < 7000 ? 0.98 : 1.12)),
     redline: 8800,
     shiftUpRpm: 8500,
-    drift: { rearGrip: 0.82, assist: 0.72 },
+    drift: { rearGrip: 0.78, assist: 0.82 },
   },
   {
     ...DRIFT_BASE,
@@ -350,7 +350,7 @@ export const CARS: CarSpec[] = [
     torque: scaleTorque(DRIFT_BASE.torque, (r) => (r < 3500 ? 1.45 : r < 6000 ? 1.3 : 1.15)),
     cylinders: 8,
     gears: [3.1, 2.1, 1.55, 1.2, 1.0, 0.84],
-    drift: { rearGrip: 0.86, assist: 0.78 },
+    drift: { rearGrip: 0.82, assist: 0.88 },
   },
 ];
 

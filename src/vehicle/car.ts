@@ -504,7 +504,14 @@ export class Car {
     if (CAR.drift && grounded && !held && vFwd > 4) {
       const yaw = _ang.dot(_up);
       const beta = this.slipAngle;
-      const lim = 0.95;
+      const lim = 1.05;
+      // momentum assist: on throttle a slide keeps its speed instead of scrubbing it all off, so
+      // drifts flow from corner to corner (arcade-style)
+      if (throttle > 0.1 && Math.abs(beta) > 0.12 && speed > 5) {
+        const push = CAR.mass * 4.5 * Math.min(1, Math.abs(beta) / 0.5) * throttle * dt;
+        _F.copy(_lin).setY(0).normalize().multiplyScalar(push);
+        b.applyImpulse({ x: _F.x, y: 0, z: _F.z }, true);
+      }
       // the slide grows when the car rotates away from its direction of travel
       const growing = yaw * -Math.sign(beta) > 0;
       if (Math.abs(beta) > lim && growing) {
@@ -512,7 +519,7 @@ export class Car {
         b.applyTorqueImpulse({ x: _up.x * k, y: _up.y * k, z: _up.z * k }, true);
       }
       // gentle yaw damping keeps the slide smooth
-      const kd = -yaw * 0.6 * CAR.drift.assist * CAR.inertia.y * dt;
+      const kd = -yaw * 0.3 * CAR.drift.assist * CAR.inertia.y * dt;
       b.applyTorqueImpulse({ x: _up.x * kd, y: _up.y * kd, z: _up.z * kd }, true);
     }
 

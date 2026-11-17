@@ -6,10 +6,10 @@
  * wall during a combo loses it.
  */
 export const DRIFT = {
-  minAngle: 12, // degrees
-  minSpeed: 8, // m/s
-  chainGap: 1.3, // s without drifting before a combo is banked
-  multEvery: 2.5, // s of drifting per multiplier step
+  minAngle: 10, // degrees
+  minSpeed: 7, // m/s
+  chainGap: 2, // s without drifting before a combo is banked
+  multEvery: 2, // s of drifting per multiplier step
   maxMult: 5,
 };
 
@@ -50,7 +50,7 @@ export class DriftScorer {
       this.driftT += dt;
       // more angle and more speed = more points; a little bonus for the big-angle sweet spot
       const sweet = this.angle > 30 && this.angle < 70 ? 1.25 : 1;
-      this.combo += (this.angle - DRIFT.minAngle * 0.8) * speed * 0.32 * sweet * dt;
+      this.combo += (this.angle - DRIFT.minAngle * 0.8) * speed * 0.45 * sweet * dt;
       const m = Math.min(DRIFT.maxMult, 1 + Math.floor(this.driftT / DRIFT.multEvery));
       if (m > this.mult) this.say(`×${m} COMBO`, '#ffcc00');
       this.mult = m;
@@ -66,7 +66,8 @@ export class DriftScorer {
     const pts = Math.round(this.combo * this.mult);
     this.total += pts;
     this.best = Math.max(this.best, pts);
-    this.say(`+${pts.toLocaleString()}`, pts > 5000 ? '#3ad17a' : '#ffffff');
+    const hype = pts > 40000 ? 'LEGENDARY DRIFT! ' : pts > 20000 ? 'INSANE DRIFT! ' : pts > 8000 ? 'GREAT DRIFT! ' : pts > 2500 ? 'NICE! ' : '';
+    this.say(`${hype}+${pts.toLocaleString()}`, pts > 20000 ? '#ff4fd8' : pts > 8000 ? '#3ad17a' : '#ffffff');
     this.reset();
   }
 

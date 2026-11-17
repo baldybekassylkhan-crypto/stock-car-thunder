@@ -61,6 +61,7 @@ Open http://localhost:5173.
 | Shift (hold) | Energy boost (GP cars; recharges under braking) |
 | C | Cycle camera (chase, far chase, hood, cockpit, TV) · next car when spectating |
 | Mouse drag | Hold a mouse button and drag to look around; release and the camera swings back |
+| Space (hold) | Handbrake (drift cars) · next car while spectating |
 | Hold R (3 s) | Reset car to the track (5 s penalty in a race) · new car in free practice after a wreck |
 | B | Open / close the pit plan; 1–4 change tyres, fuel, repair, front wing |
 | Esc / P | Pause (the host can end the race for everyone and send them back to the lobby) |
@@ -72,7 +73,7 @@ Gamepad: left stick steers, RT/LT are throttle/brake, LB/RB shift, A opens the d
 
 1. One player clicks **Host room**. They get a 6-character code (and a shareable link).
 2. Friends click **Join room** and type the code, or just open the link.
-3. The host picks the mode at the top of the lobby: **🏁 Race** or **💥 Demolition Arena**. Everyone's lobby switches with it, so one room plays both (no separate arena room).
+3. The host picks the mode at the top of the lobby: **🏁 Race**, **🌀 Drift** or **💥 Demolition Arena**. Everyone's lobby switches with it, so one room plays both (no separate arena room).
 4. Everyone presses **Ready**, then the host sets up the race (track, laps, damage, AI, weather) or the arena (AI wreckers, events, time limit) and clicks **Start**.
 
 Anyone who opens the code or link while a race or arena match is running joins as a **spectator**: they watch the cars (Space or C switches to the next car) and drive in the next race.
@@ -145,13 +146,27 @@ A dry GP race must use two different dry compounds; a car that doesn't gets 30 s
 ## Pit stops
 
 - Every track has a pit lane with a speed limit (80 km/h for GP cars, 72 km/h for stock cars), a crew at each box and a pit wall.
-- Press **B** to open the pit plan: tyres, fuel (stock cars), damage repair and a new front wing (GP cars). Drive into the pit lane and the car stops in its box by itself.
+- Press **B** to open the pit plan: tyres, fuel (stock cars), damage repair and a new front wing (GP cars).
+- **Repair bays:** every stall is a painted bay (green = free, red = taken, yellow = yours). Drive into the pit lane and park in any free bay yourself; once the car stands still in it the crew starts working and repairs any damage. AI cars use their own stalls.
 - A stop takes at most **10 seconds** (tyres, fuel, repair and a slow wheel nut add time up to that cap). Speeding in the pit lane is a penalty.
 - AI drivers plan their own stops around tyre wear, fuel, damage and the weather, spread out so they don't all pit on the same lap.
 
+## Drift mode
+
+The third mode in the lobby (**🌀 Drift**, next to Race and Demolition Arena): a timed session (2–10 minutes) on **Neon Docks Drift Park**, a wide walled course on a container port at night. No AI, no flags, no pit stops.
+
+- **Cars:** Ronin S-14 (balanced, easiest), Kaze RX-8R (light and high-revving, flicks into slides), Brute V8 (huge torque, wide smoky drifts).
+- **Handling:** looser rear tyres, big steering lock, a handbrake (**Space**, pad **A**) to throw the car sideways, no traction control. The drift assist countersteers for you, catches slides before they become spins, and keeps the car's speed up through a drift on throttle.
+- **Scoring:** points for angle × speed while sliding (bonus between 30° and 70°); linked drifts build a combo multiplier up to ×5; a combo is banked after 2 s of grip; hitting a wall loses it. Live leaderboard, drift results at the end.
+
+## Racing extras
+
+- **Slipstream:** tuck in behind another car and two white air lines stream along both sides of your car, with a SLIPSTREAM meter; the tow cuts your drag by up to about a third.
+- **Name tags** float above every other car; while spectating a banner shows who you're watching.
+
 ## Track detail
 
-Every race track gets building facades with window grids (part of the windows lit, glowing at night and at dusk) and pit lane equipment at each stall: tyre stacks (with coloured tyre blankets for GP cars), tool trolleys, an overhead pit boom with a light and an air hose, team signs, and fuel rigs for stock cars (`src/tracks/detail.ts`).
+Several trackside boards carry the **Zharkyn** mascot logo. Every race track gets building facades with window grids (part of the windows lit, glowing at night and at dusk) and pit lane equipment at each stall: tyre stacks (with coloured tyre blankets for GP cars), tool trolleys, an overhead pit boom with a light and an air hose, team signs, and fuel rigs for stock cars (`src/tracks/detail.ts`).
 
 ## Grand Prix circuits
 
