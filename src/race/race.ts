@@ -139,12 +139,12 @@ export class RaceDirector {
       st.lap = Math.max(0, lp.lap - 1);
       st.last = lp.lastLap;
       st.best = lp.bestLap;
-      // a wreck brings out the yellow, but the car respawns and stays in the race
+      // a wreck is a LOCAL yellow: only cars coming up to it slow down (the rest keep racing);
+      // the car respawns 20 s later and stays in the race
       if (st.status === 0 && e.destroyed()) {
         if (!this.wrecked.has(e.slot)) {
           this.wrecked.add(e.slot);
           this.incidents.set(e.slot, { i: lp.index, t: this.time });
-          if (!this.practice && this.phase === 'green') this.caution('Wreck', 'sc');
         }
       } else this.wrecked.delete(e.slot);
       if (completed && st.status === 0 && !this.practice && (this.flag === 'checkered' || st.lap >= this.laps)) {
@@ -159,12 +159,11 @@ export class RaceDirector {
           const t = (this.stopped.get(e.slot) ?? 0) + dt;
           this.stopped.set(e.slot, t);
           if (t > 1.5) this.incidents.set(e.slot, { i: lp.index, t: this.time });
-          // stock cars: caution after 3 s; GP: a local yellow first, a virtual safety car if it stays there
-          if (this.series === 'gp' ? t > 10 : t > 3) { this.caution('Stopped car', 'vsc'); this.stopped.set(e.slot, -15); }
+          // a stopped car is a local yellow too (no full-course caution)
         } else if ((this.stopped.get(e.slot) ?? 0) > 0) this.stopped.set(e.slot, 0);
       }
       // wrecks stay a local yellow until the car is back
-      if (this.wrecked.has(e.slot) && this.incidents.has(e.slot)) this.incidents.get(e.slot)!.t = this.time;
+      if (this.wrecked.has(e.slot) && this.incidents.has(e.slot)) { const inc = this.incidents.get(e.slot)!; inc.t = this.time; inc.i = lp.index; }
     }
     if (this.phase === 'pace' && leaderStarted) {
       this.phase = 'green';

@@ -179,7 +179,7 @@ export function arenaLobbyScreen(room: Room, h: ArenaLobbyHandlers) {
   }
 }
 
-export function arenaResultsScreen(res: ArenaResult, reward: Reward, canRestart: boolean, h: { again(): void; lobby(): void; menu(): void }) {
+export function arenaResultsScreen(res: ArenaResult, reward: Reward | null, canRestart: boolean, h: { again(): void; lobby(): void; menu(): void }) {
   const me = res.me;
   const title = me.won ? '🏆 VICTORY!' : `#${me.position} of ${me.cars}`;
   const root = mountScreen(`
@@ -200,13 +200,13 @@ export function arenaResultsScreen(res: ArenaResult, reward: Reward, canRestart:
             <div><b>${Math.round(me.damageTaken)}</b><span>Damage received</span></div>
             <div><b>${Math.floor(me.survival / 60)}:${String(Math.round(me.survival) % 60).padStart(2, '0')}</b><span>Survival time</span></div>
           </div>
-          <div class="arena-reward">
+          ${!reward ? '<div class="arena-reward"><h3>You watched this match</h3><div>You drive in the next one.</div></div>' : `<div class="arena-reward">
             <h3>Rewards</h3>
             ${reward.lines.map((l) => `<div><span>${esc(l.label)}</span><b>+${l.xp} XP</b></div>`).join('')}
             <div class="total"><span>Total</span><b>+${reward.xp} XP · +${reward.credits} credits</b></div>
             ${reward.levelAfter > reward.levelBefore ? `<div class="levelup">LEVEL UP! Level ${reward.levelAfter}</div>` : ''}
             ${reward.unlocked.map((u) => `<div class="unlock">🔓 ${esc(u)}</div>`).join('')}
-          </div>
+          </div>`}
         </div>
       </div>
       <div class="row" style="margin-top:16px">

@@ -108,7 +108,7 @@ export class ArenaAudio {
   countdownBeep(go: boolean) { this.tone(go ? [880, 1320] : [440], go ? 0.6 : 0.25, 'square', 0.12); }
   finalTwo() { this.tone([110, 165, 220], 1.6, 'sawtooth', 0.14, 0.98); this.noise(1.2, 300, 1200, 0.25); }
   shockwave() { this.noise(0.7, 2000, 120, 0.5); this.tone([60], 0.6, 'sine', 0.35, 0.5); }
-  repair() { this.tone([660, 990], 0.35, 'triangle', 0.12, 1.3); }
+  boing() { this.tone([180, 360], 0.45, 'sine', 0.18, 2.4); }
   nitro() { this.noise(0.9, 400, 3000, 0.3); }
   pickup() { this.tone([880, 1175, 1568], 0.3, 'triangle', 0.1); }
   victory() { this.tone([262, 330, 392, 523], 2.2, 'sawtooth', 0.12); }

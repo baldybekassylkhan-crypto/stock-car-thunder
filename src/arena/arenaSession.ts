@@ -153,6 +153,8 @@ export class ArenaSession {
   private emitAcc = new Map<string, number>();
   private readonly isHost: boolean;
   private readonly self: number;
+  /** Joined mid-match: no car, just watching (Space / C: next car). */
+  readonly spectator: boolean;
   private readonly seed: number;
   readonly eventIds: string[];
 
@@ -167,6 +169,7 @@ export class ArenaSession {
   ) {
     this.isHost = room.isHost;
     this.self = room.selfSlot;
+    this.spectator = !grid.some((g) => g.slot === this.self);
     this.seed = seed;
     this.eventIds = pickEvents(cfg.events, seed);
     this.hud = new ArenaHud(hudRoot);
@@ -646,6 +649,26 @@ export class ArenaSession {
     else this.room.sendEvent('aelim', { v: l.slot, k: killer });
   }
 
+  // ====================================================================== trampolines
+  private padT = new Map<number, number>();
+  /** A car rolling onto a trampoline is launched into the air (each peer launches its own cars). */
+  private trampoline(l: Local) {
+    const p = l.car.position;
+    if (p.y > 1.4 || this.time - (this.padT.get(l.slot) ?? -9) < 1) return;
+    const pad = this.arena.trampolines.find((t) => Math.hypot(p.x - t.x, p.z - t.z) < t.r);
+    if (!pad) return;
+    const v = l.car.body.linvel();
+    if (v.y > 2) return;
+    this.padT.set(l.slot, this.time);
+    const flat = Math.hypot(v.x, v.z);
+    // ~7 m up; a little extra push forward so cars fly over each other
+    const boost = flat > 1 ? Math.min(1.25, 1 + 4 / flat) : 1;
+    l.car.body.setLinvel({ x: v.x * boost, y: 11.5, z: v.z * boost }, true);
+    l.car.body.setAngvel({ x: (Math.random() - 0.5) * 0.6, y: l.car.body.angvel().y, z: (Math.random() - 0.5) * 0.6 }, true);
+    pad.t = 0;
+    if (l.slot === this.self) { this.sfx?.boing(); this.rig.addShake?.(0.25); }
+  }
+
   // ====================================================================== pickups
   private confirmPickup(id: number, slot: number) {
     if (!this.events.pickups.get(id) || this.events.pickups.get(id)!.taken) return;
@@ -709,7 +732,8 @@ export class ArenaSession {
     this.time += dt;
     const me = this.me;
     if (interactive && !this.paused) {
-      if (wasPressed('KeyC')) { if (me && !me.dmg.alive) this.nextSpectate(); else this.rig.next(); }
+      if (wasPressed('KeyC')) { if (!me || !me.dmg.alive) this.nextSpectate(); else this.rig.next(); }
+      if (wasPressed('Space') && (!me || !me.dmg.alive)) this.nextSpectate();
       if (me && this.phase === 'combat') {
         const map: [AbilityId, string[]][] = [['nitro', ['ShiftLeft', 'ShiftRight', 'Digit1']], ['ram', ['KeyF', 'Digit2']], ['shock', ['KeyQ', 'Digit3', 'Digit4']]];
         for (const [id, keys] of map) if (keys.some((k) => wasPressed(k))) this.useAbility(me, id);
@@ -763,6 +787,7 @@ export class ArenaSession {
       }
       if (!locked && alive) {
         // pickups
+        this.trampoline(l);
         const pk = this.events.pickupNear(l.car.position);
         if (pk) { if (this.isHost) this.confirmPickup(pk.id, l.slot); else if (l.slot === this.self) this.room.sendEvent('apickreq', { id: pk.id, s: l.slot }); }
         // upside down or stuck on its side for a while: the marshals tip it back
@@ -799,6 +824,13 @@ export class ArenaSession {
     for (const l of this.locals.values()) this.carFx(dt, l.slot, l.car.visual, l.car, l.dmg.smoke, l.dmg.alive ? (l.dmg.stage >= 4 ? 0.35 : 0) + (this.events.hazardAt(l.car.position, this.matchT).fire ? 0.6 : 0) : 0.8, l.ab.active.nitro > 0, l.ab.active.ram > 0);
     for (const [s, rc] of this.remotes) if (rc.latest) this.carFx(dt, s, rc.visual, null, rc.latest.smoke, rc.latest.fire, (this.remoteNitro.get(s) ?? 0) > this.time, (this.remoteRam.get(s) ?? 0) > this.time);
     this.events.update(dt, this.matchT, this.effects);
+    // trampoline mats squash when a car bounces (also for other players' cars, seen from here)
+    for (const pad of this.arena.trampolines) {
+      for (const rc of this.remotes.values()) if (Math.hypot(rc.pos.x - pad.x, rc.pos.z - pad.z) < pad.r && rc.pos.y < 1.4 && rc.vel.y > 6 && pad.t > 0.5) pad.t = 0;
+      pad.t += dt;
+      const sq = pad.t < 0.5 ? Math.sin(pad.t / 0.5 * Math.PI) : 0;
+      pad.mat.position.y = 0.17 - sq * 0.12;
+    }
     if (this.phase === 'victory') this.victoryShow(dt);
     for (const sr of this.shockRings) {
       sr.t += dt;
@@ -903,7 +935,7 @@ export class ArenaSession {
   private cameraTarget(): number {
     if (this.phase === 'victory' || this.phase === 'done') return this.winner >= 0 ? this.winner : this.self;
     const me = this.me;
-    if (me && !me.dmg.alive && this.time - (this.info.get(this.self)?.deathT ?? 0) > 0) {
+    if (!me || (!me.dmg.alive && this.time - (this.info.get(this.self)?.deathT ?? 0) > 0)) {
       if (this.spectating < 0 || !this.alive(this.spectating)) this.nextSpectate();
       return this.spectating >= 0 ? this.spectating : this.self;
     }
@@ -982,7 +1014,8 @@ export class ArenaSession {
     const armor = { front: 1, rear: 1, left: 1, right: 1 } as Record<Zone, number>;
     if (dmg) for (const z of Object.keys(armor) as Zone[]) armor[z] = dmg.armorCond[z];
     let status = '';
-    if (me && !me.dmg.alive && this.phase === 'combat') status = this.spectating >= 0 ? `SPECTATING ${this.name(this.spectating).toUpperCase()} (C: next)` : 'ELIMINATED';
+    if (!me) status = `SPECTATING ${this.spectating >= 0 ? this.name(this.spectating).toUpperCase() : ''} · SPACE: NEXT CAR · YOU JOIN THE NEXT MATCH`;
+    else if (!me.dmg.alive && this.phase === 'combat') status = this.spectating >= 0 ? `SPECTATING ${this.name(this.spectating).toUpperCase()} (Space: next)` : 'ELIMINATED';
     else if (this.phase === 'intro') status = `${this.grid.length} vehicles · last one standing wins`;
     else if (this.phase === 'combat' && this.events.suddenActive(this.matchT) && me && Math.hypot(me.car.position.x, me.car.position.z) > this.events.safeRadius(this.matchT)) status = 'OUTSIDE THE SAFE ZONE!';
     this.hud.update({

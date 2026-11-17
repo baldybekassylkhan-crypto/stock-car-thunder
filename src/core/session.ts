@@ -111,6 +111,8 @@ export class Session {
   private pits: PitManager | null = null;
   private readonly isHost: boolean;
   private readonly self: number;
+  /** Joined mid-race: no car of our own, just watching (Space / C: next car). */
+  readonly spectator: boolean;
 
   constructor(
     private r: Renderer,
@@ -125,6 +127,7 @@ export class Session {
     this.hud.show(false);
     this.isHost = room.isHost;
     this.self = room.selfSlot;
+    this.spectator = !grid.some((g) => g.slot === this.self);
   }
 
   // ====================================================================== setup
@@ -164,6 +167,14 @@ export class Session {
         this.carColliders.add(rc.collider.handle);
         this.r.scene.add(rc.visual.root);
       }
+    }
+    if (this.spectator) {
+      // a parked, invisible stand-in so the rest of the session can treat "our car" as usual
+      const g0 = this.grid[0];
+      const pl = tr.placement(0, 0, 0.62);
+      this.car = this.makeCar({ number: 0, color: '#888888', seed: 1 }, pl.pos.setY(pl.pos.y - 400), pl.quat, carSpec(g0.car));
+      this.car.body.setEnabled(false);
+      this.car.visual.root.visible = false;
     }
     this.applyAssists();
     this.progress = new LapProgress(tr);
@@ -208,7 +219,7 @@ export class Session {
     if (this.isHost) {
       if (this.room.offline || this.grid.filter((g) => !g.bot).length === 1) this.begin();
       else setTimeout(() => this.begin(), 25000); // don't wait forever for a slow loader
-    } else {
+    } else if (!this.spectator) {
       this.room.sendEvent('loaded', {});
     }
   }
@@ -655,7 +666,7 @@ export class Session {
         punctured: car.damage.punctured.reduce((m, p, i) => m | (p ? 1 << i : 0), 0),
       }));
     };
-    pack(this.self, this.car);
+    if (!this.spectator) pack(this.self, this.car);
     for (const [s, b] of this.bots) pack(s, b.car);
     this.room.sendStates(out);
   }
@@ -692,8 +703,10 @@ export class Session {
         if (this.spectating >= 0) this.nextSpectate();
         else this.rig.next();
       }
+      // Space: next car while watching (spectators, or waiting for a respawn)
+      if (wasPressed('Space') && (this.spectator || this.spectating >= 0)) this.nextSpectate();
       wasPressed('KeyR'); // a tap does nothing: reset needs a hold
-      if (resetHeld()) {
+      if (resetHeld() && !this.spectator) {
         this.resetHold += dt;
         if (this.resetHold >= RESET_HOLD) {
           this.requestReset();
@@ -734,7 +747,7 @@ export class Session {
     if (this.penalty > 0) this.penalty -= dt;
     this.pits?.update(dt, [this.self, ...this.bots.keys()]);
     this.car.inputLocked = limit === 0 || this.penalty > 0 || !!this.pits?.held(this.self);
-    this.carLimit = easeLimit(this.carLimit, limit, this.car.telemetry.speed, dt);
+    this.carLimit = easeLimit(this.carLimit, Math.min(limit, this.yellowLimit(this.self)), this.car.telemetry.speed, dt);
     this.car.speedLimit = Math.min(this.carLimit, this.pits?.speedCap(this.self) ?? Infinity);
     this.driveBots(dt, limit);
     this.computeDraft();
@@ -804,6 +817,9 @@ export class Session {
         this.flash('BACK ON TRACK', 1.5);
       }
     }
+
+    // ---------------- spectators always watch somebody ----------------
+    if (this.spectator && (this.spectating < 0 || !(this.carOf(this.spectating) || this.remotes.has(this.spectating)))) this.nextSpectate();
 
     // ---------------- after a wreck: spectate, then back in the race 20 s later ----------------
     if (this.car.damage.destroyed) {
@@ -946,7 +962,7 @@ export class Session {
       traffic.push({ pos, vel, i, d: tr.lateral(pos, i), dead: dead || (this.race.phase === 'green' && vel.length() < 3) });
     };
     const lv = this.car.body.linvel();
-    addT(this.self, this.car.position.clone(), new THREE.Vector3(lv.x, lv.y, lv.z), this.car.damage.destroyed);
+    if (!this.spectator) addT(this.self, this.car.position.clone(), new THREE.Vector3(lv.x, lv.y, lv.z), this.car.damage.destroyed);
     for (const [s, rc] of this.remotes) addT(s, rc.pos.clone(), rc.vel.clone(), this.destroyedOf(s));
     for (const [s, b] of this.bots) { const bv = b.car.body.linvel(); addT(s, b.car.position.clone(), new THREE.Vector3(bv.x, bv.y, bv.z), b.car.damage.destroyed); }
     // humans: bots far from all of them re-plan every other frame (nobody is close enough to notice)
@@ -954,7 +970,7 @@ export class Session {
     this.botFrame++;
     for (const [slot, b] of this.bots) {
       const far = humans.every((h) => h.distanceToSquared(b.car.position) > FAR_BOT_M * FAR_BOT_M);
-      b.limit = easeLimit(b.limit, limit, b.car.telemetry.speed, dt);
+      b.limit = easeLimit(b.limit, Math.min(limit, this.yellowLimit(slot)), b.car.telemetry.speed, dt);
       if (far && limit > 0 && (this.botFrame + slot) % 2 === 1 && !b.ai.wantsReset && !b.ai.pit) {
         if (b.penalty > 0) b.penalty -= dt;
         continue;
@@ -1024,6 +1040,11 @@ export class Session {
     }
   }
 
+  /** Speed limit inside a local yellow zone (near a crash or a stopped car); no limit elsewhere. */
+  private yellowLimit(slot: number) {
+    return this.race.phase === 'green' && this.aids?.yellow.has(slot) ? this.map.paceSpeed * 1.2 : Infinity;
+  }
+
   private nextSpectate() {
     const alive = this.grid.map((g) => g.slot).filter((s) => s !== this.self && !this.destroyedOf(s) && (this.carOf(s) || this.remotes.has(s)));
     if (!alive.length) { this.spectating = -1; return; }
@@ -1072,17 +1093,18 @@ export class Session {
     });
     const dmg = this.car.damage;
     let status = '';
-    if (this.resetHold > 0.15) status = `KEEP HOLDING R — ${dmg.destroyed && !this.cfg.laps ? 'NEW CAR' : 'RESET'} IN ${Math.max(0, RESET_HOLD - this.resetHold).toFixed(1)}s`;
+    if (this.spectator) status = `SPECTATING ${this.entry(this.spectating)?.nickname ?? ''} · SPACE: NEXT CAR · YOU JOIN THE NEXT RACE`;
+    else if (this.resetHold > 0.15) status = `KEEP HOLDING R — ${dmg.destroyed && !this.cfg.laps ? 'NEW CAR' : 'RESET'} IN ${Math.max(0, RESET_HOLD - this.resetHold).toFixed(1)}s`;
     else if (dmg.destroyed) {
       const left = Math.max(0, Math.ceil(RESPAWN - (this.time - Math.max(0, this.destroyedAt))));
-      status = `DESTROYED — BACK IN ${left} s${this.spectating >= 0 ? ` · WATCHING ${this.entry(this.spectating)?.nickname ?? ''} (C: next)` : this.cfg.laps ? '' : ' (or hold R)'}`;
+      status = `DESTROYED — BACK IN ${left} s${this.spectating >= 0 ? ` · WATCHING ${this.entry(this.spectating)?.nickname ?? ''} (Space: next)` : this.cfg.laps ? '' : ' (or hold R)'}`;
     }
     else if (this.race.phase === 'pace') status = 'PACE LAP — HOLD POSITION';
     else if (this.race.phase === 'caution') status = this.race.sc === 'vsc' ? 'VIRTUAL SAFETY CAR — KEEP TO THE LIMIT' : this.race.sc === 'sc' ? 'SAFETY CAR — NO OVERTAKING' : 'CAUTION — SLOW DOWN';
     else if (this.pits && this.pits.phaseOf(this.self) === 'service') status = `PIT STOP — ${Math.max(0, this.pits.timerOf(this.self)).toFixed(1)} s`;
     else if (this.pits && (this.pits.phaseOf(this.self) === 'stopping' || this.pits.phaseOf(this.self) === 'waiting')) status = 'PIT STOP — CREW READY';
     else if (this.pits && this.pits.speedCap(this.self) < Infinity) status = `PIT LIMITER ${Math.round(this.pits.limit * (settings.units === 'mph' ? 2.237 : 3.6))} ${settings.units === 'mph' ? 'MPH' : 'KM/H'}`;
-    else if (this.localYellow) status = 'YELLOW FLAG — SLOW, NO OVERTAKING';
+    else if (this.localYellow) status = 'YELLOW FLAG — CRASH AHEAD, SLOW DOWN, NO OVERTAKING';
     else if (this.car.fuel <= 0) status = 'OUT OF FUEL';
     else if (this.race.phase === 'loading') status = 'WAITING FOR DRIVERS…';
     else if (dmg.fire > 0) status = 'ON FIRE!';

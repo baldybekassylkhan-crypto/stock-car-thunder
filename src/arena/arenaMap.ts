@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { toCollider, type ColliderMesh } from '../tracks/build';
 import type { Atmosphere } from '../tracks/maps';
 import * as tex from '../render/textures';
-import { rng } from '../tracks/props';
+import { rng, SPONSOR_BOARDS } from '../tracks/props';
+import { textDecal } from '../vehicle/carModel';
 
 /**
  * The Demolition Arena: a floodlit circular dirt bowl. A concrete wall with tyre cushions and a
@@ -18,6 +19,8 @@ export interface ArenaMap {
   radius: number;
   /** Solid obstacles inside the arena (for the AI). */
   obstacles: { x: number; z: number; r: number }[];
+  /** Trampolines: drive onto one and the car is launched into the air. `mat` squashes when used. */
+  trampolines: { x: number; z: number; r: number; mat: THREE.Object3D; t: number }[];
   spawn(k: number, n: number): { pos: THREE.Vector3; quat: THREE.Quaternion };
   /** Camera spots in the stands for intro / victory shots. */
   tvCams: THREE.Vector3[];
@@ -174,6 +177,48 @@ export function buildArena(): ArenaMap {
     colliders.push(boxCollider('wall', 1.9, 1.1, 4.6, m));
     obstacles.push({ x, z, r: 2.8 });
   }
+  // ---------- trampolines: one in the middle, four around it ----------
+  const trampolines: ArenaMap['trampolines'] = [];
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0xf2c200, metalness: 0.4, roughness: 0.45 });
+  const padMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.55, emissive: 0x0b2a80, emissiveIntensity: 0.5 });
+  const springMat = new THREE.MeshStandardMaterial({ color: 0xcfd3d8, metalness: 1, roughness: 0.3 });
+  const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+  const padSpots: [number, number][] = [[0, 0], ...[0, 1, 2, 3].map((k): [number, number] => { const a = k * Math.PI / 2 + Math.PI / 4; return [Math.cos(a) * 24, Math.sin(a) * 24]; })];
+  for (const [x, z] of padSpots) {
+    const rr = 3;
+    const frame = new THREE.Mesh(new THREE.TorusGeometry(rr, 0.16, 8, 40), frameMat);
+    frame.rotation.x = -Math.PI / 2;
+    frame.position.set(x, 0.2, z);
+    frame.castShadow = true;
+    group.add(frame);
+    const mat = new THREE.Group();
+    mat.position.set(x, 0.17, z);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(rr - 0.12, 40), padMat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.receiveShadow = true;
+    mat.add(disc);
+    // an up arrow painted on the mat
+    const arrow = new THREE.Shape();
+    arrow.moveTo(0, 1.3); arrow.lineTo(0.9, 0.2); arrow.lineTo(0.35, 0.2); arrow.lineTo(0.35, -1.1);
+    arrow.lineTo(-0.35, -1.1); arrow.lineTo(-0.35, 0.2); arrow.lineTo(-0.9, 0.2); arrow.closePath();
+    const am = new THREE.Mesh(new THREE.ShapeGeometry(arrow), arrowMat);
+    am.rotation.x = -Math.PI / 2;
+    am.position.y = 0.01;
+    mat.add(am);
+    group.add(mat);
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      const sp = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3, 6), springMat);
+      sp.position.set(x + Math.cos(a) * (rr - 0.05), 0.08, z + Math.sin(a) * (rr - 0.05));
+      group.add(sp);
+    }
+    trampolines.push({ x, z, r: rr - 0.2, mat, t: 9 });
+  }
+
+  addFloorDetail(group, r);
+  addWallBanners(group);
+  addBackstage(group, r);
+
   // scattered loose junk (visual)
   const junk = new THREE.InstancedMesh(tyreGeo, tyreMat, 40);
   for (let k = 0; k < junk.count; k++) {
@@ -341,6 +386,7 @@ export function buildArena(): ArenaMap {
     colliders,
     radius: R,
     obstacles,
+    trampolines,
     tvCams: [0, 1, 2, 3, 4, 5].map((k) => { const a = (k / 6) * Math.PI * 2 + 0.3; return new THREE.Vector3(Math.cos(a) * (R + 12), 14, Math.sin(a) * (R + 12)); }),
     spawn(k, n) {
       const a = (k / Math.max(1, n)) * Math.PI * 2;
@@ -383,4 +429,157 @@ export function buildArena(): ArenaMap {
       exposure: 1.0,
     },
   };
+}
+
+/** Floor detail: mud patches, puddles, tyre tracks, loose body panels and cones (all visual). */
+function addFloorDetail(group: THREE.Group, r: () => number) {
+  const flat = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, z: number, y: number, rot: number, sx = 1, sz = 1) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.rotation.set(-Math.PI / 2, 0, rot);
+    m.scale.set(sx, sz, 1);
+    m.position.set(x, y, z);
+    m.receiveShadow = true;
+    group.add(m);
+    return m;
+  };
+  const decalMat = (color: number, opacity: number, rough = 1, metal = 0) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, transparent: true, opacity, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
+  // irregular mud patches
+  const blob = (k: number) => {
+    const sh = new THREE.Shape();
+    const n = 14;
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const rr = 1 + 0.35 * Math.sin(a * 3 + k) + 0.2 * Math.sin(a * 5 + k * 2);
+      if (i === 0) sh.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); else sh.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    return new THREE.ShapeGeometry(sh, 4);
+  };
+  const mud = decalMat(0x3d2a1c, 0.55);
+  for (let k = 0; k < 18; k++) {
+    const a = r() * Math.PI * 2, d = 8 + r() * 60;
+    flat(blob(k), mud, Math.cos(a) * d, Math.sin(a) * d, 0.014, r() * 6, 2 + r() * 4, 1.5 + r() * 3);
+  }
+  // puddles: dark and glossy
+  const water = decalMat(0x1c1a17, 0.85, 0.05, 0.4);
+  for (let k = 0; k < 6; k++) {
+    const a = r() * Math.PI * 2, d = 15 + r() * 50;
+    flat(blob(k + 30), water, Math.cos(a) * d, Math.sin(a) * d, 0.018, r() * 6, 1.2 + r() * 1.6, 0.8 + r());
+  }
+  // tyre tracks: a canvas of curving double lines laid over the whole floor
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 1024;
+  const ctx = cv.getContext('2d')!;
+  ctx.strokeStyle = 'rgba(30,20,12,0.55)';
+  ctx.lineCap = 'round';
+  for (let k = 0; k < 46; k++) {
+    const x = r() * 1024, y = r() * 1024, rad = 80 + r() * 380, a0 = r() * 6.3, len = 0.6 + r() * 2;
+    ctx.lineWidth = 5 + r() * 4;
+    for (const off of [0, 22]) {
+      ctx.beginPath();
+      ctx.arc(x, y, rad + off, a0, a0 + len);
+      ctx.stroke();
+    }
+  }
+  const tracksTex = new THREE.CanvasTexture(cv);
+  tracksTex.colorSpace = THREE.SRGBColorSpace;
+  tracksTex.anisotropy = 4;
+  const trackMat = new THREE.MeshStandardMaterial({ map: tracksTex, transparent: true, roughness: 1, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+  flat(new THREE.CircleGeometry(74, 64), trackMat, 0, 0, 0.016, 0);
+  // loose body panels (doors, hoods) and a few cones
+  const panelCols = [0x8a2a22, 0x2c4a8a, 0xcfa21a, 0x3c6e3a, 0x777777, 0xe0e0e0];
+  for (let k = 0; k < 16; k++) {
+    const a = r() * Math.PI * 2, d = 10 + r() * 58;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.9 + r() * 0.7, 0.04, 0.6 + r() * 0.8), new THREE.MeshStandardMaterial({ color: panelCols[k % panelCols.length], metalness: 0.5, roughness: 0.6 }));
+    m.position.set(Math.cos(a) * d, 0.04, Math.sin(a) * d);
+    m.rotation.set((r() - 0.5) * 0.15, r() * 6, (r() - 0.5) * 0.15);
+    m.castShadow = m.receiveShadow = true;
+    group.add(m);
+  }
+  const coneMat = new THREE.MeshStandardMaterial({ color: 0xff6a00, roughness: 0.6 });
+  const coneBand = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+  for (let k = 0; k < 10; k++) {
+    const a = r() * Math.PI * 2, d = 20 + r() * 45;
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    const c = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.7, 12), coneMat);
+    const knocked = r() < 0.5;
+    c.position.set(x, knocked ? 0.2 : 0.35, z);
+    if (knocked) c.rotation.set(Math.PI / 2, 0, r() * 6);
+    c.castShadow = true;
+    group.add(c);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 0.12, 12), coneBand);
+    band.position.copy(c.position);
+    band.rotation.copy(c.rotation);
+    group.add(band);
+  }
+}
+
+/** Sponsor banners on the wall, in the gaps between the tyre cushions. */
+function addWallBanners(group: THREE.Group) {
+  const names = [...SPONSOR_BOARDS, 'DEMOLITION ARENA', 'LAST ONE STANDING', 'THUNDER SERIES', 'WRECK NIGHT'];
+  const colors = ['#c81e1e', '#111111', '#1d4ed8', '#f2c200', '#166534', '#7c3aed'];
+  for (let seg = 0; seg < 12; seg++) {
+    // cushions sit at a0 .. a0 + 0.2 rad; the banner goes in the middle of the gap after them
+    const a = (seg / 12) * Math.PI * 2 + 0.12 + 0.2 + 0.16;
+    const bg = colors[seg % colors.length];
+    const fg = bg === '#f2c200' ? '#111111' : '#ffffff';
+    const tex = textDecal(names[seg % names.length], bg, fg, 1024, 128);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(14, 1.1), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7 }));
+    const rr = R - 0.25;
+    m.position.set(Math.cos(a) * rr, 0.78, Math.sin(a) * rr);
+    m.lookAt(0, 0.78, 0);
+    group.add(m);
+  }
+}
+
+/** Behind the fence (seen through it): barrels, hay bales, a tow truck and a crew trailer. */
+function addBackstage(group: THREE.Group, r: () => number) {
+  const barrelCols = [0xb91c1c, 0x1d4ed8, 0xf2c200, 0x3f6212];
+  const barrelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.9, 14);
+  for (let k = 0; k < 40; k++) {
+    const a = r() * Math.PI * 2, d = R + 1.1 + r() * 1.2;
+    const m = new THREE.Mesh(barrelGeo, new THREE.MeshStandardMaterial({ color: barrelCols[k % barrelCols.length], metalness: 0.5, roughness: 0.5 }));
+    m.position.set(Math.cos(a) * d, 0.45, Math.sin(a) * d);
+    m.castShadow = true;
+    group.add(m);
+  }
+  const hayMat = new THREE.MeshStandardMaterial({ color: 0xc9a54a, roughness: 1 });
+  for (let k = 0; k < 24; k++) {
+    const a = r() * Math.PI * 2, d = R + 1.6;
+    for (let h = 0; h < 2; h++) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.55, 0.6), hayMat);
+      m.position.set(Math.cos(a) * d, 0.28 + h * 0.55, Math.sin(a) * d);
+      m.rotation.y = -a + (r() - 0.5) * 0.2;
+      m.castShadow = true;
+      group.add(m);
+    }
+  }
+  // tow truck (simple boxes) and a crew trailer in the gaps between the stands
+  const truck = new THREE.Group();
+  const red = new THREE.MeshStandardMaterial({ color: 0xb91c1c, metalness: 0.4, roughness: 0.5 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.6, 2), red);
+  cabin.position.set(0, 1.3, 1.6);
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.6, 3.6), red);
+  bed.position.set(0, 0.8, -1.2);
+  const boom = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 3), dark);
+  boom.position.set(0, 2.0, -1.6);
+  boom.rotation.x = 0.5;
+  truck.add(cabin, bed, boom);
+  for (const [x, z] of [[1.1, 1.6], [-1.1, 1.6], [1.1, -2], [-1.1, -2]]) {
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.35, 14), dark);
+    w.rotation.z = Math.PI / 2;
+    w.position.set(x, 0.45, z);
+    truck.add(w);
+  }
+  const ta = 0.05;
+  truck.position.set(Math.cos(ta) * (R + 4), 0, Math.sin(ta) * (R + 4));
+  truck.rotation.y = -ta;
+  truck.traverse((o) => { o.castShadow = true; });
+  group.add(truck);
+  const trailer = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.6, 8), new THREE.MeshStandardMaterial({ color: 0xe5e7eb, metalness: 0.3, roughness: 0.5 }));
+  const tb = Math.PI + 0.05;
+  trailer.position.set(Math.cos(tb) * (R + 5), 1.6, Math.sin(tb) * (R + 5));
+  trailer.rotation.y = -tb;
+  trailer.castShadow = true;
+  group.add(trailer);
 }

@@ -91,8 +91,8 @@ export class RaceAids {
     for (const c of cars) {
       const s = this.st.get(c.slot)!;
       const idx = s.idx;
-      // local yellow: from 200 m before an incident to 60 m past it
-      for (const y of race.yellow) if (within(idx, tr.wrap(y - Math.round(200 / tr.ds)), tr.wrap(y + Math.round(60 / tr.ds)))) this.yellow.add(c.slot);
+      // local yellow: from 300 m before an incident to 80 m past it (cars there slow down)
+      for (const y of race.yellow) if (within(idx, tr.wrap(y - Math.round(300 / tr.ds)), tr.wrap(y + Math.round(80 / tr.ds)))) this.yellow.add(c.slot);
       // blue flag: a car at least half a lap up the road is within 1.5 s behind
       const mine = progress.get(c.slot) ?? 0;
       for (const o of cars) {

@@ -52,8 +52,12 @@ function leaveRoom(notice?: string) {
   mainMenu(nav, undefined, notice);
 }
 
+/** Host: what the race/match in progress was started with (sent to late joiners, who spectate). */
+let currentStart: { grid: GridEntry[] | ArenaEntry[]; settings: RoomSettings; seed?: number } | null = null;
+
 function wireRoom(r: Room) {
   room = r;
+
   r.onEvent = (type, p, from) => {
     if (type === 'start' && !r.isHost) {
       const msg = p as { grid: GridEntry[] | ArenaEntry[]; settings: RoomSettings; seed?: number };
@@ -61,6 +65,11 @@ function wireRoom(r: Room) {
       r.inRace = true;
       if (msg.settings.mode === 'arena') void startArena(msg.grid as ArenaEntry[], msg.settings, msg.seed ?? 1);
       else void startSession(msg.grid as GridEntry[], msg.settings);
+      return;
+    }
+    // a player who joined mid-race asks for the race in progress and watches it
+    if (type === 'spectate' && r.isHost) {
+      if (r.inRace && currentStart) r.sendEventTo(from, 'start', { ...currentStart, spectate: true });
       return;
     }
     if (type === 'lobby-return') {
@@ -100,6 +109,8 @@ function showLobby() {
     start: () => {
       const grid = buildGrid(r);
       r.inRace = true;
+      currentStart = { grid, settings: { ...r.settings } };
+      r.reserved = new Set(grid.map((g) => g.slot));
       r.sendEvent('start', { grid, settings: r.settings });
       void startSession(grid, { ...r.settings });
     },
@@ -166,6 +177,8 @@ function startArenaMatch() {
   const grid = buildArenaGrid(r);
   const seed = Math.floor(Math.random() * 1e6);
   r.inRace = true;
+  currentStart = { grid, settings: { ...r.settings }, seed };
+  r.reserved = new Set(grid.map((g) => g.slot));
   r.sendEvent('start', { grid, settings: r.settings, seed });
   void startArena(grid, { ...r.settings }, seed);
 }
@@ -184,7 +197,7 @@ async function startArena(grid: ArenaEntry[], cfg: RoomSettings, seed: number) {
       show();
     },
     onResults: (res) => {
-      const reward = grantRewards(loadArenaProfile(), res.me, unlocksAt);
+      const reward = a.spectator ? null : grantRewards(loadArenaProfile(), res.me, unlocksAt);
       arenaResultsScreen(res, reward, r.isHost, {
         again: () => startArenaMatch(),
         lobby: () => { r.inRace = false; r.sendEvent('lobby-return', {}); endSession(); showLobby(); },
@@ -281,7 +294,11 @@ const nav: Nav = {
     const r = await Room.join(profile, code);
     history.replaceState(null, '', `${location.pathname}?room=${code}`);
     wireRoom(r);
-    if (r.inRace) messageScreen('Race in progress', 'You will join the next race from the lobby.', () => showLobby());
+    // mid-race: the host sends the race in progress and we watch it as a spectator
+    if (r.inRace) {
+      loadingScreen('Race in progress — joining as a spectator…');
+      r.sendEvent('spectate', {});
+    }
     else showLobby();
   },
   single() {

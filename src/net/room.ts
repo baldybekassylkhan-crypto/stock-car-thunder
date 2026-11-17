@@ -113,6 +113,8 @@ export class Room {
   onEvent: (type: string, payload: unknown, from: number) => void = () => {};
   onState: (buf: ArrayBuffer) => void = () => {};
   onClosed: (reason: string) => void = () => {};
+  /** Host: car slots used by the race in progress (AI included), so a mid-race joiner gets a free one. */
+  reserved = new Set<number>();
 
   private peer?: Peer;
   private links = new Map<string, ClientLink>(); // host: peerId → link
@@ -233,15 +235,14 @@ export class Room {
       const link = this.links.get(conn.peer);
       if (m.t === 'hello') {
         if (this.humans.length >= MAX_HUMANS) return this.rejectConn(conn, `Room full (max ${MAX_HUMANS} players).`);
-        if (this.inRace) return this.rejectConn(conn, 'A race is in progress. Try again when it ends.');
         const used = new Set(this.players.map((p) => p.slot));
         let slot = 1;
-        while (used.has(slot)) slot++;
+        while (used.has(slot) || this.reserved.has(slot)) slot++;
         this.links.set(conn.peer, { slot, ev: conn, st: this.pendingSt.get(conn.peer), sent: new Map() });
         this.players.push({ slot, nickname: String(m.nickname).slice(0, 16), number: Number(m.number) | 0, color: String(m.color), ready: false, isHost: false, ping: 0, cars: cleanCars(m.cars), tyre: cleanTyre(m.tyre), arena: cleanLoadout(m.arena) });
         conn.send({ t: 'welcome', slot, players: this.players, settings: this.settings, inRace: this.inRace } satisfies Msg);
         this.pushLobby();
-        this.onChat(-1, `${m.nickname} joined`);
+        this.onChat(-1, `${m.nickname} joined${this.inRace ? ' (spectating)' : ''}`);
         return;
       }
       if (!link) return;
@@ -373,6 +374,11 @@ export class Room {
     if (this.offline) return;
     if (this.isHost) this.broadcast({ t: 'ev', e, p, f: this.selfSlot });
     else if (this.hostEv?.open) this.hostEv.send({ t: 'ev', e, p } satisfies Msg);
+  }
+
+  /** Host: reliable game event to one client only. */
+  sendEventTo(slot: number, e: string, p: unknown) {
+    for (const l of this.links.values()) if (l.slot === slot && l.ev.open) l.ev.send({ t: 'ev', e, p, f: this.selfSlot } satisfies Msg);
   }
 
   private storeRelay(slot: number, buf: ArrayBuffer) {
