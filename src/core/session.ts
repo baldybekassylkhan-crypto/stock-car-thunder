@@ -24,6 +24,7 @@ import { encodeState, decodeState } from '../net/codec';
 import { addTrackDetail } from '../tracks/detail';
 import { DriftScorer, DriftHud } from '../race/drift';
 import { NameTags, WatchBanner } from '../render/nameTags';
+import { Slipstream } from '../render/slipstream';
 import { RaceDirector, easeLimit, type RaceSnapshot, type ResultRow } from '../race/race';
 import { PART_NAMES, type PartName, type CarVisual } from '../vehicle/carModel';
 import type { LoadedMap, MapDef } from '../tracks/maps';
@@ -115,6 +116,7 @@ export class Session {
   private prevSpeed = 0;
   private tags = new NameTags();
   private watch: WatchBanner;
+  private slip: Slipstream | null = null;
   private scrapeLevel = 0;
   private spotter = '';
   private spotterUntil = 0;
@@ -146,6 +148,7 @@ export class Session {
     this.hud = new Hud(hudRoot);
     this.hud.show(false);
     this.watch = new WatchBanner(hudRoot);
+    if (cfg.mode !== 'drift') this.slip = new Slipstream(this.r.scene, hudRoot);
     this.drift = cfg.mode === 'drift';
     if (this.drift) {
       this.driftHud = new DriftHud(hudRoot);
@@ -906,8 +909,36 @@ export class Session {
     this.updateDrift(dt, interactive);
     if (interactive) {
       this.updateTags();
+      this.updateSlip(dt);
       this.updateHud(tm);
     }
+  }
+
+  /** The car you're slipstreaming (the strongest tow right ahead), for the slipstream effect. */
+  private updateSlip(dt: number) {
+    if (!this.slip) return;
+    const me = this.car;
+    const v = me.body.linvel();
+    const vel = new THREE.Vector3(v.x, v.y, v.z);
+    const sp = vel.length();
+    let leader: { pos: THREE.Vector3; fwd: THREE.Vector3 } | null = null;
+    if (sp > 20 && this.spectating < 0 && !me.damage.destroyed) {
+      const fwd = vel.clone().divideScalar(sp);
+      const reach = me.spec.series === 'gp' ? 55 : 35;
+      let best = 0;
+      const consider = (pos: THREE.Vector3) => {
+        const rel = pos.clone().sub(me.position);
+        const along = rel.dot(fwd);
+        if (along < 3 || along > reach) return;
+        const lat = rel.clone().addScaledVector(fwd, -along).length();
+        if (lat > 2.2) return;
+        const w = (1 - along / reach) * (1 - lat / 2.2);
+        if (w > best) { best = w; leader = { pos: pos.clone(), fwd }; }
+      };
+      for (const b of this.bots.values()) consider(b.car.position);
+      for (const rc of this.remotes.values()) consider(rc.pos);
+    }
+    this.slip.update(dt, me.draft, me.position, leader, sp);
   }
 
   /** Nicknames over every other car, and the "watching" banner while spectating. */
@@ -1261,6 +1292,7 @@ export class Session {
     this.driftHud?.dispose();
     this.tags.dispose();
     this.watch.dispose();
+    this.slip?.dispose();
     if (this.map) this.r.scene.remove(this.map.group);
     if (this.racingLine) { this.r.scene.remove(this.racingLine.mesh); this.racingLine.dispose(); }
     this.pits?.dispose();

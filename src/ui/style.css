@@ -325,6 +325,15 @@ input.code { font-family: var(--font-display); font-size: 34px; letter-spacing: 
 .drift-results li b { color: #ff4fd8; }
 .results tr.me td { background: rgba(255, 79, 216, 0.12); }
 
+/* slipstream meter (fills while you tow behind another car) */
+.slip-meter { position: absolute; bottom: 150px; left: 50%; transform: translateX(-50%) translateY(8px); display: flex; flex-direction: column; align-items: center; gap: 4px; opacity: 0; transition: opacity 0.25s, transform 0.25s; pointer-events: none; }
+.slip-meter.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+.slip-meter span { font: 800 14px var(--font-display); letter-spacing: 3px; color: #bfe6ff; text-shadow: 0 0 10px rgba(120, 200, 255, 0.8); }
+.slip-meter i { display: block; width: 200px; height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.15); overflow: hidden; }
+.slip-meter b { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #7fd0ff, #ffffff); transition: width 0.1s linear; }
+.slip-meter.full span { color: #fff; animation: slipPulse 0.6s ease-in-out infinite alternate; }
+@keyframes slipPulse { from { text-shadow: 0 0 6px rgba(120, 200, 255, 0.6); } to { text-shadow: 0 0 18px rgba(200, 240, 255, 1); } }
+
 /* spectating: who you're watching */
 .watch-banner { position: absolute; top: 74px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-radius: 12px; background: rgba(8, 10, 16, 0.78); border: 1px solid rgba(255, 204, 0, 0.45); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); pointer-events: none; font-family: var(--font-display); white-space: nowrap; z-index: 5; }
 .watch-banner .wb-eye { font: 800 13px var(--font-display); letter-spacing: 2px; color: var(--accent); }

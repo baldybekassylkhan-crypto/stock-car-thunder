@@ -24,11 +24,13 @@ export class NameTags {
         t.root = c.root;
       }
       const d = camera.position.distanceTo(c.root.getWorldPosition(_p));
-      t.sprite.visible = c.root.visible && d < 170;
-      // grow a little with distance so far tags stay readable, highlight the car being watched
-      const s = THREE.MathUtils.clamp(d / 28, 1, 3.2) * (c.slot === watching ? 1.25 : 1);
-      t.sprite.scale.set(3.2 * s, 0.8 * s, 1);
-      (t.sprite.material as THREE.SpriteMaterial).opacity = c.slot === watching ? 1 : THREE.MathUtils.clamp(1.2 - d / 170, 0.35, 0.95);
+      // hidden right next to the camera (it would cover the view) and far away
+      t.sprite.visible = c.root.visible && d > 7 && d < 170;
+      // small up close, growing with distance so far tags stay readable; the watched car's tag is bigger
+      const s = THREE.MathUtils.clamp(d / 30, 0.6, 3) * (c.slot === watching ? 1.25 : 1);
+      t.sprite.scale.set(2.6 * s, 0.65 * s, 1);
+      const near = THREE.MathUtils.clamp((d - 7) / 8, 0, 1);
+      (t.sprite.material as THREE.SpriteMaterial).opacity = near * (c.slot === watching ? 1 : THREE.MathUtils.clamp(1.2 - d / 170, 0.35, 0.9));
     }
     for (const [slot, t] of this.tags) if (!seen.has(slot)) { t.sprite.removeFromParent(); this.tags.delete(slot); }
   }
