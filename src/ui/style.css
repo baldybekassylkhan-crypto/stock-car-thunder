@@ -220,3 +220,67 @@ input.code { font-family: var(--font-display); font-size: 34px; letter-spacing: 
 
 .pitmenu { position: absolute; left: 24px; bottom: 60px; background: rgba(10, 12, 18, 0.82); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; font: 600 14px var(--font-body); line-height: 1.6; color: #eef1f6; }
 .pitmenu .pm-head { font: 800 15px var(--font-display); color: var(--accent); letter-spacing: 0.04em; }
+
+/* ---------------- Demolition Arena HUD ---------------- */
+.ah-top { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; font-family: var(--font-display); }
+.ah-stat { min-width: 92px; padding: 6px 12px; background: rgba(8, 10, 15, 0.7); border: 1px solid var(--line); border-radius: 9px; text-align: center; }
+.ah-stat b { display: block; font-size: 30px; font-weight: 800; line-height: 1; color: #fff; }
+.ah-stat span { font-size: 11px; letter-spacing: 0.08em; color: var(--muted); }
+.ah-mods { position: absolute; top: 74px; left: 50%; transform: translateX(-50%); font: 700 13px var(--font-body); color: #fbbf24; text-shadow: 0 2px 6px #000; }
+.ah-feed { position: absolute; top: 16px; right: 20px; width: 300px; text-align: right; font: 600 14px var(--font-body); text-shadow: 0 2px 6px #000; }
+.ah-feed div { margin-bottom: 4px; padding: 3px 8px; background: rgba(8, 10, 15, 0.55); border-radius: 6px; display: inline-block; clear: both; float: right; }
+.ah-center { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-family: var(--font-display); text-shadow: 0 4px 16px rgba(0, 0, 0, 0.8); pointer-events: none; }
+.ah-cd { font-size: 160px; font-weight: 900; font-style: italic; color: #ffcc00; line-height: 1; }
+.ah-banner { font-size: 56px; font-weight: 900; font-style: italic; letter-spacing: 0.02em; }
+.ah-status { font-size: 22px; font-weight: 700; color: #ffb4a8; margin-top: 6px; }
+.ah-vignette { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 160px 40px rgba(220, 20, 20, 0.9); opacity: 0; transition: opacity 0.2s; }
+.ah-hit, .ah-incoming { position: absolute; left: 50%; top: 50%; pointer-events: none; }
+.ah-hit { width: 340px; height: 340px; border-radius: 50%; border-top: 10px solid rgba(255, 60, 40, 0.85); filter: drop-shadow(0 0 8px rgba(255, 60, 40, 0.9)); }
+.ah-incoming { color: #ffcc00; font: 900 36px var(--font-display); text-align: center; text-shadow: 0 0 10px #000; }
+.ah-incoming small { display: block; font-size: 12px; letter-spacing: 0.1em; }
+.ah-bl { position: absolute; left: 20px; bottom: 34px; width: 330px; font-family: var(--font-display); text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7); }
+.ah-stage { font-size: 18px; font-weight: 800; letter-spacing: 0.06em; }
+.ah-hp { position: relative; height: 22px; background: rgba(0, 0, 0, 0.6); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 4px 0 8px; }
+.ah-hp div { height: 100%; transition: width 0.15s; }
+.ah-hp span { position: absolute; right: 8px; top: 0; line-height: 22px; font-weight: 800; font-size: 16px; }
+.ah-row { display: flex; align-items: center; gap: 12px; }
+.ah-armor { width: 34px; height: 52px; }
+.ah-armor rect[data-z] { stroke: rgba(0, 0, 0, 0.6); stroke-width: 1; }
+.ah-bars { flex: 1; font: 11px var(--font-body); }
+.ah-bars div { display: flex; align-items: center; gap: 6px; }
+.ah-bars span { width: 48px; color: var(--muted); }
+.ah-bars i { flex: 1; height: 7px; background: rgba(0, 0, 0, 0.5); border-radius: 4px; overflow: hidden; }
+.ah-bars b { display: block; height: 100%; }
+.ah-warn { color: #ff6b6b; font: 800 14px var(--font-display); margin-top: 6px; min-height: 16px; }
+.ah-speed { font-size: 44px; font-weight: 800; font-style: italic; }
+.ah-speed small { font-size: 14px; margin-left: 3px; }
+.ah-br { position: absolute; right: 20px; bottom: 30px; display: flex; gap: 10px; }
+.ah-ab { position: relative; width: 82px; height: 96px; text-align: center; font-family: var(--font-body); }
+.ah-ring { position: absolute; left: 11px; top: 0; width: 60px; height: 60px; border-radius: 50%; }
+.ah-icon { position: absolute; left: 17px; top: 6px; width: 48px; height: 48px; border-radius: 50%; background: rgba(10, 12, 18, 0.92); font-size: 24px; line-height: 48px; filter: grayscale(0.8); opacity: 0.7; }
+.ah-ab.ready .ah-icon { filter: none; opacity: 1; }
+.ah-ab.active .ah-icon { box-shadow: 0 0 18px 6px rgba(255, 204, 0, 0.7); }
+.ah-name { position: absolute; top: 63px; width: 100%; font-size: 10px; font-weight: 700; color: #eef1f6; text-shadow: 0 1px 4px #000; }
+.ah-key { position: absolute; top: 78px; width: 100%; font-size: 10px; color: var(--muted); }
+.ah-uses { position: absolute; right: 6px; top: 0; font: 800 13px var(--font-display); color: #3ad17a; }
+.ah-hint { position: absolute; left: 20px; bottom: 8px; font: 12px var(--font-body); color: var(--muted); }
+@media (max-width: 700px) { .ah-stat { min-width: 64px; } .ah-stat b { font-size: 20px; } .ah-feed { display: none; } .ah-ab { width: 64px; } .ah-bl { width: 240px; } }
+
+.menu-tile.arena-tile { grid-column: 1 / -1; border-color: rgba(255, 90, 40, 0.6); background: linear-gradient(90deg, rgba(232, 53, 44, 0.22), rgba(255, 204, 0, 0.1)); }
+.arena-level { display: flex; align-items: center; gap: 10px; margin: -4px 0 12px; font-size: 13px; color: var(--muted); }
+.arena-level > b { color: var(--accent); font: 800 18px var(--font-display); }
+.arena-level i { flex: 1; max-width: 220px; height: 7px; background: rgba(255, 255, 255, 0.1); border-radius: 4px; overflow: hidden; }
+.arena-level i b { display: block; height: 100%; background: var(--accent); }
+.arena-lobby .arena-pick { margin-top: 0; grid-template-columns: 1fr; }
+.arena-lobby .carpick-view { height: 180px; }
+.arena-results .results tr.win td { color: var(--accent); font-weight: 700; }
+.arena-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.arena-stats div { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.arena-stats b { display: block; font: 800 26px var(--font-display); }
+.arena-stats span { font-size: 12px; color: var(--muted); }
+.arena-reward { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+.arena-reward h3 { margin: 0 0 6px; font: 800 18px var(--font-display); }
+.arena-reward div { display: flex; justify-content: space-between; padding: 2px 0; }
+.arena-reward .total { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; color: var(--accent); }
+.arena-reward .levelup { color: #3ad17a; font: 800 18px var(--font-display); }
+.arena-reward .unlock { color: #ffcc00; }

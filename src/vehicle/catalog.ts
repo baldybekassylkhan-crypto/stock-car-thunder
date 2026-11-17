@@ -86,6 +86,8 @@ export interface CarSpec {
   ers: { power: number; capacity: number } | null;
 
   damage: DamageProfile;
+  /** Demolition-arena kit on a stock body (bumper bars, cage, armour plates). */
+  kit?: { cls: string; bumper: string };
 }
 
 // ------------------------------------------------------------------ stock cars

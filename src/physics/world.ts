@@ -17,6 +17,7 @@ export const SURFACE_GRIP: Record<SurfaceKind, number> = {
   sand: 0.45,
   gravel: 0.5,
   curb: 0.9,
+  dirt: 0.82, // packed arena dirt: slidey but drivable
 };
 export const SURFACE_DRAG: Record<SurfaceKind, number> = {
   asphalt: 0,
@@ -26,6 +27,7 @@ export const SURFACE_DRAG: Record<SurfaceKind, number> = {
   sand: 1.4,
   gravel: 1.8,
   curb: 0,
+  dirt: 0.1,
 };
 
 /** Collision groups: (membership << 16) | filter. */

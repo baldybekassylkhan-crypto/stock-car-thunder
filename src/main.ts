@@ -10,6 +10,10 @@ import {
   nicknameScreen, mainMenu, loadingScreen, pauseScreen, garageScreen, clearUI, lobbyScreen, resultsScreen,
   messageScreen, resetChat, BOT_NAMES, type Nav,
 } from './ui/screens';
+import { ArenaSession, type ArenaEntry, type ArenaSettings } from './arena/arenaSession';
+import { CLASSES, BUMPERS } from './arena/classes';
+import { grantRewards, loadArenaProfile } from './arena/rewards';
+import { arenaLobbyScreen, arenaResultsScreen, loadoutColor, unlocksAt, ARENA_MAX } from './ui/arenaScreens';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const hudRoot = document.getElementById('hud')!;
@@ -17,10 +21,12 @@ const renderer = new Renderer(canvas);
 renderer.setQuality(settings.quality);
 
 let session: Session | null = null;
+let arena: ArenaSession | null = null;
 let room: Room | null = null;
 const roomParam = new URLSearchParams(location.search).get('room') ?? undefined;
 
-const DEFAULT_SETTINGS = (): RoomSettings => ({ map: 'sunvale', laps: 10, damage: 'realistic', bots: 5, weather: 'dry', series: 'stock', sameCar: '' });
+const DEFAULT_SETTINGS = (): RoomSettings => ({ map: 'sunvale', laps: 10, damage: 'realistic', bots: 5, weather: 'dry', series: 'stock', sameCar: '', mode: 'race' });
+const ARENA_SETTINGS = (): RoomSettings => ({ ...DEFAULT_SETTINGS(), mode: 'arena', arena: { bots: 7, events: 'off', timeLimit: 0 } });
 const BOT_COLORS = [
   '#2b7de9', '#e9472b', '#14b48c', '#f0a020', '#9b3de0', '#e0e0e0', '#1a1a1a', '#e83e8c', '#5bc0eb', '#8bc34a',
   '#ff7f11', '#0b3d91', '#c81d25', '#2ec4b6', '#ffd23f', '#6a4c93', '#3a3a3a', '#f15bb5', '#00bbf9', '#9ef01a',
@@ -30,6 +36,8 @@ const BOT_COLORS = [
 function endSession() {
   session?.dispose();
   session = null;
+  arena?.dispose();
+  arena = null;
 }
 
 function leaveRoom(notice?: string) {
@@ -48,10 +56,11 @@ function wireRoom(r: Room) {
   room = r;
   r.onEvent = (type, p, from) => {
     if (type === 'start' && !r.isHost) {
-      const msg = p as { grid: GridEntry[]; settings: RoomSettings };
+      const msg = p as { grid: GridEntry[] | ArenaEntry[]; settings: RoomSettings; seed?: number };
       r.settings = msg.settings;
       r.inRace = true;
-      void startSession(msg.grid, msg.settings);
+      if (msg.settings.mode === 'arena') void startArena(msg.grid as ArenaEntry[], msg.settings, msg.seed ?? 1);
+      else void startSession(msg.grid as GridEntry[], msg.settings);
       return;
     }
     if (type === 'lobby-return') {
@@ -61,8 +70,9 @@ function wireRoom(r: Room) {
       return;
     }
     session?.handleEvent(type, p, from);
+    arena?.handleEvent(type, p, from);
   };
-  r.onState = (buf) => session?.handleState(buf);
+  r.onState = (buf) => { session?.handleState(buf); arena?.handleState(buf); };
   r.onClosed = (reason) => {
     endSession();
     room = null;
@@ -73,6 +83,10 @@ function wireRoom(r: Room) {
 function showLobby() {
   if (!room) return;
   const r = room;
+  if (r.settings.mode === 'arena') {
+    arenaLobbyScreen(r, { leave: () => leaveRoom(), start: () => startArenaMatch() });
+    return;
+  }
   lobbyScreen(r, {
     leave: () => leaveRoom(),
     start: () => {
@@ -114,6 +128,72 @@ function buildGrid(r: Room): GridEntry[] {
   return all;
 }
 
+/** Host: arena grid — every human's loadout, AI wreckers in a mix of classes, random spawn order. */
+function buildArenaGrid(r: Room): ArenaEntry[] {
+  const humans: ArenaEntry[] = r.humans.map((p) => ({
+    slot: p.slot, nickname: p.nickname, number: p.number, color: loadoutColor(p.arena?.paint ?? '', p.color), bot: false,
+    cls: CLASSES.some((c) => c.id === p.arena?.cls) ? p.arena!.cls : 'balanced', bumper: p.arena?.bumper ?? 'bar',
+  }));
+  const cfg = r.settings.arena ?? { bots: 7, events: 'off', timeLimit: 0 };
+  const count = Math.min(cfg.bots, ARENA_MAX - humans.length);
+  const used = new Set(humans.map((h) => h.slot));
+  const taken = new Set(humans.map((h) => h.number));
+  const bots: ArenaEntry[] = [];
+  let slot = 0, num = 2;
+  for (let i = 0; i < count; i++) {
+    while (used.has(slot)) slot++;
+    used.add(slot);
+    while (taken.has(num)) num++;
+    taken.add(num);
+    bots.push({ slot, nickname: BOT_NAMES[i % BOT_NAMES.length], number: num, color: BOT_COLORS[i % BOT_COLORS.length], bot: true, cls: CLASSES[(i * 3 + 1) % CLASSES.length].id, bumper: BUMPERS[i % BUMPERS.length].id });
+  }
+  const all = [...humans, ...bots];
+  for (let i = all.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [all[i], all[j]] = [all[j], all[i]]; }
+  return all;
+}
+
+function startArenaMatch() {
+  if (!room) return;
+  const r = room;
+  const grid = buildArenaGrid(r);
+  const seed = Math.floor(Math.random() * 1e6);
+  r.inRace = true;
+  r.sendEvent('start', { grid, settings: r.settings, seed });
+  void startArena(grid, { ...r.settings }, seed);
+}
+
+async function startArena(grid: ArenaEntry[], cfg: RoomSettings, seed: number) {
+  if (!room) return;
+  endSession();
+  const r = room;
+  loadingScreen('Loading the arena…');
+  const acfg: ArenaSettings = cfg.arena ?? { bots: 7, events: 'off', timeLimit: 0 };
+  const a = new ArenaSession(renderer, hudRoot, r, acfg, grid, seed, {
+    onExit: () => leaveRoom(),
+    onPause: (paused, api) => {
+      if (!paused) return clearUI();
+      const show = () => pauseScreen({ ...api, settings: () => garageScreen(show, () => renderer.setQuality(settings.quality)) }, !r.offline);
+      show();
+    },
+    onResults: (res) => {
+      const reward = grantRewards(loadArenaProfile(), res.me, unlocksAt);
+      arenaResultsScreen(res, reward, r.isHost, {
+        again: () => startArenaMatch(),
+        lobby: () => { r.inRace = false; r.sendEvent('lobby-return', {}); endSession(); showLobby(); },
+        menu: () => leaveRoom(),
+      });
+    },
+  });
+  arena = a;
+  try {
+    await a.load((m) => loadingScreen(m));
+    if (arena === a) clearUI();
+  } catch (e) {
+    console.error(e);
+    messageScreen('Could not load the arena', (e as Error).message, () => leaveRoom());
+  }
+}
+
 async function startSession(grid: GridEntry[], cfg: RoomSettings) {
   if (!room) return;
   endSession();
@@ -149,7 +229,30 @@ async function startSession(grid: GridEntry[], cfg: RoomSettings) {
   }
 }
 
+async function hostRoom(settingsFor: () => RoomSettings) {
+  loadingScreen('Creating room…');
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const r = await Room.host(profile, makeRoomCode(), settingsFor());
+      wireRoom(r);
+      showLobby();
+      return;
+    } catch (e) {
+      if ((e as { code?: string }).code === 'taken') continue;
+      messageScreen('Could not create a room', (e as Error).message, () => mainMenu(nav));
+      return;
+    }
+  }
+  messageScreen('Could not create a room', 'Please try again.', () => mainMenu(nav));
+}
+
 const nav: Nav = {
+  arenaSingle() {
+    const r = Room.offline(profile, ARENA_SETTINGS());
+    wireRoom(r);
+    showLobby();
+  },
+  arenaHost() { void hostRoom(ARENA_SETTINGS); },
   async host() {
     loadingScreen('Creating room…');
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -185,6 +288,6 @@ else nicknameScreen(() => mainMenu(nav, roomParam));
 
 // dev-only handles for live tuning / automated testing from the console
 if (import.meta.env.DEV) {
-  Object.assign(window, { __r: renderer, __s: () => session, __room: () => room });
+  Object.assign(window, { __r: renderer, __s: () => session, __a: () => arena, __room: () => room });
   void import('./dev/autotest').then((m) => { m.installAutotest(() => session); m.installRaceTest(() => session); m.installStartTest(() => session); m.installDamageTest(() => session); m.installQuickRace(() => session); });
 }

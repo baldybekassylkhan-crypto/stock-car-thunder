@@ -15,7 +15,18 @@ export interface RoomSettings {
   series: Series;
   /** '' = every driver picks their own car; otherwise everyone races this car id. */
   sameCar: string;
+  /** Racing or the Demolition Arena. */
+  mode?: 'race' | 'arena';
+  /** Arena options: AI opponents, modifiers ('off' | 'random' | an event id), time limit (s, 0 = none). */
+  arena?: { bots: number; events: string; timeLimit: number };
 }
+
+/** A player's arena loadout: combat class, bumper design and paint job. */
+export interface ArenaLoadout { cls: string; bumper: string; paint: string }
+const cleanLoadout = (a: unknown): ArenaLoadout => {
+  const o = (a ?? {}) as Record<string, unknown>;
+  return { cls: String(o.cls ?? 'balanced').slice(0, 20), bumper: String(o.bumper ?? 'bar').slice(0, 12), paint: String(o.paint ?? '').slice(0, 12) };
+};
 
 export interface Player {
   slot: number;
@@ -30,14 +41,16 @@ export interface Player {
   cars: Record<Series, string>;
   /** Starting tyre for dry GP races. */
   tyre?: DryTyre;
+  /** Demolition Arena loadout. */
+  arena?: ArenaLoadout;
 }
 
 export type DryTyre = 'soft' | 'medium' | 'hard';
 const cleanTyre = (t: unknown): DryTyre => (t === 'soft' || t === 'hard' ? t : 'medium');
 
 type Msg =
-  | { t: 'hello'; nickname: string; number: number; color: string; cars: Record<Series, string>; tyre?: DryTyre }
-  | { t: 'car'; cars: Record<Series, string>; tyre?: DryTyre }
+  | { t: 'hello'; nickname: string; number: number; color: string; cars: Record<Series, string>; tyre?: DryTyre; arena?: ArenaLoadout }
+  | { t: 'car'; cars: Record<Series, string>; tyre?: DryTyre; arena?: ArenaLoadout }
   | { t: 'welcome'; slot: number; players: Player[]; settings: RoomSettings; inRace: boolean }
   | { t: 'reject'; reason: string }
   | { t: 'lobby'; players: Player[]; settings: RoomSettings }
@@ -152,7 +165,7 @@ export class Room {
 
   static join(profile: Profile, code: string): Promise<Room> {
     return new Promise((resolve, reject) => {
-      const r = new Room(code, false, false, { map: 'sunvale', laps: 10, damage: 'realistic', bots: 0, weather: 'dry', series: 'stock', sameCar: '' });
+      const r = new Room(code, false, false, { map: 'sunvale', laps: 10, damage: 'realistic', bots: 0, weather: 'dry', series: 'stock', sameCar: '', mode: 'race' });
       const peer = new Peer(PEER_OPTS);
       r.peer = peer;
       let settled = false;
@@ -223,7 +236,7 @@ export class Room {
         let slot = 1;
         while (used.has(slot)) slot++;
         this.links.set(conn.peer, { slot, ev: conn, st: this.pendingSt.get(conn.peer), sent: new Map() });
-        this.players.push({ slot, nickname: String(m.nickname).slice(0, 16), number: Number(m.number) | 0, color: String(m.color), ready: false, isHost: false, ping: 0, cars: cleanCars(m.cars), tyre: cleanTyre(m.tyre) });
+        this.players.push({ slot, nickname: String(m.nickname).slice(0, 16), number: Number(m.number) | 0, color: String(m.color), ready: false, isHost: false, ping: 0, cars: cleanCars(m.cars), tyre: cleanTyre(m.tyre), arena: cleanLoadout(m.arena) });
         conn.send({ t: 'welcome', slot, players: this.players, settings: this.settings, inRace: this.inRace } satisfies Msg);
         this.pushLobby();
         this.onChat(-1, `${m.nickname} joined`);
@@ -239,7 +252,7 @@ export class Room {
         }
         case 'car': {
           const p = this.players.find((x) => x.slot === link.slot);
-          if (p) { p.cars = cleanCars(m.cars); p.tyre = cleanTyre(m.tyre); }
+          if (p) { p.cars = cleanCars(m.cars); p.tyre = cleanTyre(m.tyre); if (m.arena) p.arena = cleanLoadout(m.arena); }
           this.pushLobby();
           break;
         }
@@ -326,6 +339,14 @@ export class Room {
     if (me) me.ready = ready;
     if (this.isHost) this.pushLobby();
     else this.hostEv?.send({ t: 'ready', ready } satisfies Msg);
+  }
+
+  /** Change this player's arena loadout. */
+  setLoadout(a: ArenaLoadout) {
+    const me = this.self;
+    if (me) me.arena = { ...a };
+    if (this.isHost) this.pushLobby();
+    else this.hostEv?.send({ t: 'car', cars: me?.cars ?? { stock: 'stock-balanced', gp: 'gp-balanced' }, tyre: me?.tyre, arena: { ...a } } satisfies Msg);
   }
 
   /** Change this player's car picks (host applies them, clients ask the host). */

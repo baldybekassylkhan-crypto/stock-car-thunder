@@ -128,6 +128,11 @@ export class Car {
   fuel = 0;
   /** Energy-boost battery (J). */
   battery = 0;
+  /**
+   * Demolition Arena hooks: damage-stage multipliers for power, steering and grip, and an extra
+   * forward push (nitro, N). All neutral in racing.
+   */
+  readonly combat = { power: 1, steer: 1, grip: 1, push: 0 };
   /** Set by the session each frame: inside a drag-flap zone and eligible to open it. */
   drsAllowed = false;
   drsOpen = false;
@@ -280,7 +285,7 @@ export class Car {
     }
 
     const steerLock = THREE.MathUtils.lerp(CAR.steerLock[0], CAR.steerLock[1], THREE.MathUtils.smoothstep(Math.abs(vFwd), 3, 62));
-    const targetSteer = steerIn * steerLock * this.damage.steerFactor + this.damage.steerPull;
+    const targetSteer = steerIn * steerLock * this.damage.steerFactor * this.combat.steer + this.damage.steerPull;
     const steerRate = 2.2;
     this.steerAngle += THREE.MathUtils.clamp(targetSteer - this.steerAngle, -steerRate * dt, steerRate * dt);
 
@@ -296,10 +301,11 @@ export class Car {
     if (this.shiftTimer > 0) this.shiftTimer -= dt;
     let torque = 0;
     if (this.shiftTimer <= 0) {
-      torque = limiter || this.fuel <= 0 ? 0 : torqueAt(CAR.torque, rpm) * throttle * this.damage.power;
+      torque = limiter || this.fuel <= 0 ? 0 : torqueAt(CAR.torque, rpm) * throttle * this.damage.power * this.combat.power;
       if (throttle < 0.05) torque = -(40 + rpm * 0.012) * THREE.MathUtils.clamp(Math.abs(vFwd) / 5, 0, 1); // engine braking (only when rolling)
     }
     let driveForce = (torque * ratio * CAR.finalDrive * 0.88) / WHEEL_RADIUS;
+    if (this.combat.push > 0 && !held && this.gear > 0) driveForce += this.combat.push;
     // energy boost: extra electric power while the driver holds the boost button on the throttle
     let boosting = false;
     if (CAR.ers && input.boost && throttle > 0.8 && this.gear > 0 && this.battery > 0 && this.shiftTimer <= 0 && !held) {
@@ -401,7 +407,7 @@ export class Car {
       // grip
       const grip = SURFACE_GRIP[w.surface];
       const loadSens = 1 - Math.min(0.25, (fs / 5000) * 0.07);
-      const fMax = CAR.mu * grip * loadSens * fs * this.gripScale * this.damage.cornerGrip(i) * this.tyres.grip(i, this.wetTrack);
+      const fMax = CAR.mu * grip * loadSens * fs * this.gripScale * this.damage.cornerGrip(i) * this.tyres.grip(i, this.wetTrack) * this.combat.grip;
       const mCorner = this.mass / 4;
 
       // lateral demand first (traction control leaves room for it)

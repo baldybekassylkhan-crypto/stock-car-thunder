@@ -5,7 +5,7 @@ import type { PitInfo } from '../race/pits';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-export type SurfaceKind = 'asphalt' | 'concrete' | 'grass' | 'sand' | 'wall' | 'gravel' | 'curb';
+export type SurfaceKind = 'asphalt' | 'concrete' | 'grass' | 'sand' | 'wall' | 'gravel' | 'curb' | 'dirt';
 
 export interface ColliderMesh {
   kind: SurfaceKind;
