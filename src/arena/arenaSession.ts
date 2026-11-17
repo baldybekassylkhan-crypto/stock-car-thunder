@@ -669,6 +669,7 @@ export class ArenaSession {
 
   // ====================================================================== trampolines
   private padT = new Map<number, number>();
+  private fps = 60;
   /** A car rolling onto a trampoline is launched into the air (each peer launches its own cars). */
   private trampoline(l: Local) {
     const p = l.car.position;
@@ -710,6 +711,8 @@ export class ArenaSession {
     this.raf = requestAnimationFrame(this.frame);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
+    this.fps += (1 / Math.max(dt, 1e-4) - this.fps) * 0.05;
+    if (!this.paused) this.r.adapt(this.fps, dt);
     if (wasPressed('Escape') || wasPressed('KeyP')) this.setPaused(!this.paused);
     if (this.paused && this.room.offline) return;
     this.simulate(dt, true);
@@ -874,7 +877,7 @@ export class ArenaSession {
 
     // ---------------- camera, audio, hud ----------------
     this.updateCamera(dt, interactive);
-    const lodDist = LOD_DISTANCE[settings.quality] ?? 70;
+    const lodDist = (LOD_DISTANCE[settings.quality] ?? 70) * this.r.lodScale;
     const cam = this.r.camera.position;
     for (const l of this.locals.values()) updateLod(l.car.visual, cam.distanceTo(l.car.position), lodDist);
     for (const rc of this.remotes.values()) updateLod(rc.visual, cam.distanceTo(rc.pos), lodDist);

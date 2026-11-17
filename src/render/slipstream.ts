@@ -42,7 +42,7 @@ export class Slipstream {
     this.mat = new THREE.MeshBasicMaterial({ map: this.tex, alphaMap: alpha, color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
     for (let k = 0; k < 2; k++) {
       // unit-length tube along +Y, stretched and aimed each frame
-      const geo = new THREE.CylinderGeometry(0.035, 0.035, 1, 6, 1, true);
+      const geo = new THREE.CylinderGeometry(0.02, 0.02, 1, 5, 1, true);
       const m = new THREE.Mesh(geo, this.mat);
       m.frustumCulled = false;
       m.renderOrder = 5;

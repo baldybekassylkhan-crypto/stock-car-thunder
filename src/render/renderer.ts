@@ -11,7 +11,7 @@ import type { Quality } from '../core/profile';
 const QUALITY = {
   low: { pixelRatio: 0.75, shadows: false, shadowSize: 1024, post: false, bloom: false },
   medium: { pixelRatio: 1, shadows: true, shadowSize: 2048, post: true, bloom: false },
-  high: { pixelRatio: 1.25, shadows: true, shadowSize: 2048, post: true, bloom: false },
+  high: { pixelRatio: 1, shadows: true, shadowSize: 2048, post: true, bloom: false },
   ultra: { pixelRatio: 2, shadows: true, shadowSize: 4096, post: true, bloom: true },
 };
 
@@ -46,9 +46,32 @@ export class Renderer {
     window.addEventListener('resize', () => this.resize());
   }
 
+  /**
+   * Adaptive quality: when the frame rate drops, render at a lower resolution (down to 55 %) and
+   * pull the car detail distance in; raise them again once it recovers. Call every frame.
+   */
+  private dynScale = 1;
+  private lowT = 0;
+  private highT = 0;
+  adapt(fps: number, dt: number) {
+    if (document.hidden) return; // background tabs are throttled: not a real slowdown
+    if (fps < 48) { this.lowT += dt; this.highT = 0; }
+    else if (fps > 58) { this.highT += dt; this.lowT = 0; }
+    else { this.lowT = 0; this.highT = 0; }
+    if (this.lowT > 1.5 && this.dynScale > 0.55) { this.dynScale = Math.max(0.55, this.dynScale - 0.15); this.lowT = 0; this.applyScale(); }
+    else if (this.highT > 6 && this.dynScale < 1) { this.dynScale = Math.min(1, this.dynScale + 0.1); this.highT = 0; this.applyScale(); }
+  }
+  /** Multiplier for the car level-of-detail distance (1 at full quality). */
+  get lodScale() { return 0.4 + 0.6 * this.dynScale; }
+  private applyScale() {
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY[this.quality].pixelRatio) * this.dynScale);
+    this.resize();
+  }
+
   setQuality(q: Quality) {
     this.quality = q;
     const cfg = QUALITY[q];
+    this.dynScale = 1;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, cfg.pixelRatio));
     this.renderer.shadowMap.enabled = cfg.shadows;
     this.sun.castShadow = cfg.shadows;

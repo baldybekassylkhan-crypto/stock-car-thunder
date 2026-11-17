@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
  * Procedural stock car. Local frame: +Z forward, +X left, +Y up, origin on the ground
@@ -131,6 +132,33 @@ export function decalPlane(w: number, h: number, map: THREE.Texture, transparent
 }
 
 /** The stock-car body (see models.ts for picking a body by car spec). */
+/**
+ * Merge a group's direct child meshes that share one material into a single mesh (fewer draw
+ * calls: a wheel goes from ~11 meshes to 4). Only for parts that never move on their own.
+ */
+export function mergeByMaterial(group: THREE.Object3D) {
+  const byMat = new Map<THREE.Material, THREE.Mesh[]>();
+  for (const c of group.children) {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh || Array.isArray(m.material) || m.children.length) continue;
+    const list = byMat.get(m.material) ?? [];
+    list.push(m);
+    byMat.set(m.material, list);
+  }
+  for (const [mat, list] of byMat) {
+    if (list.length < 2 || !list.every((m) => !!m.geometry.index === !!list[0].geometry.index)) continue;
+    const geos = list.map((m) => { m.updateMatrix(); return m.geometry.clone().applyMatrix4(m.matrix); });
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = list.some((m) => m.castShadow);
+    mesh.receiveShadow = list.some((m) => m.receiveShadow);
+    for (const m of list) { group.remove(m); m.geometry.dispose(); }
+    group.add(mesh);
+  }
+}
+
 export function buildStockModel(opts: { number: number; color: string; seed: number }): CarVisual {
   const root = new THREE.Group();
   const body = new THREE.Group();
@@ -467,6 +495,7 @@ export function buildStockModel(opts: { number: number; color: string; seed: num
       spoke.translateY(0.1);
       spin.add(spoke);
     }
+    mergeByMaterial(spin);
     // brake disc (glows hot under braking)
     const discMat = new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.9, roughness: 0.4, emissive: 0xff3300, emissiveIntensity: 0 });
     brakeDiscs.push(discMat);

@@ -195,3 +195,44 @@ export function installQuickArena() {
     return `${A()?.grid.length} cars, events: ${A()?.eventIds.join(',') || 'none'}`;
   };
 }
+
+/**
+ * `await __sweep(map, series, bots)`: start a race on a map and fast-forward it (≈25 s of wall time),
+ * reporting cars that fell through the world, got stuck (stopped on track for 15 s), or were
+ * wrecked, plus which meshes got window facades.
+ */
+export function installSweep(getSession: () => Session | null) {
+  (window as Any).__sweep = async (map: string, series = 'stock', bots = 11, wall = 25000) => {
+    await (window as Any).__quickRace(map, 'realistic', bots, 10, series, '');
+    const S = getSession() as Any;
+    const tr = S.map.track;
+    const fac: string[] = [];
+    S.map.group.traverse((o: Any) => {
+      if (Array.isArray(o.material) && o.material[0]?.emissiveMap && o.geometry?.parameters) {
+        const p = o.geometry.parameters;
+        fac.push(`${Math.round(p.width * o.scale.x)}x${Math.round(p.height * o.scale.y)}x${Math.round(p.depth * o.scale.z)}${o.isInstancedMesh ? '(inst)' : ''}`);
+      }
+    });
+    const st: Any = { falls: 0, stuck: 0, dead: 0, fallAt: [], stuckAt: [] };
+    const slow = new Map<string, number>(), seen = new Set<string>();
+    const t0 = performance.now();
+    while (performance.now() - t0 < wall && S.race.phase !== 'finished') {
+      (window as Any).__race(5);
+      const cars: [string, Any][] = [['me', S.car], ...[...S.bots.entries()].map(([k, b]: Any): [string, Any] => [String(k), b.car])];
+      for (const [k, c] of cars) {
+        const p = c.position;
+        const i = tr.nearest(p);
+        const where = `${k}@i${i} lat${tr.lateral(p, i).toFixed(0)}`;
+        if (p.y < tr.center[i].y - 4 && !seen.has('f' + k)) { st.falls++; seen.add('f' + k); st.fallAt.push(where); }
+        const slot = k === 'me' ? S.self : Number(k);
+        if (S.race.phase === 'green' && Math.abs(c.telemetry.speed) < 2 && !S.pits?.inLane(slot) && !c.damage.destroyed) {
+          slow.set(k, (slow.get(k) ?? 0) + 5);
+          if (slow.get(k) === 15) { st.stuck++; st.stuckAt.push(where); }
+        } else slow.set(k, 0);
+        const dk = 'd' + k + Math.floor(S.time / 25);
+        if (c.damage.destroyed && !seen.has(dk)) { st.dead++; seen.add(dk); }
+      }
+    }
+    return JSON.stringify({ map, t: Math.round(S.time), phase: S.race.phase, laps: S.race.st.map((s: Any) => s.lap).join(','), ...st, facades: fac.slice(0, 14), nFac: fac.length });
+  };
+}

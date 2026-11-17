@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { contrast, decalPlane, numberDecal, textDecal, type CarVisual, type PartName } from './carModel';
+import { contrast, decalPlane, mergeByMaterial, numberDecal, textDecal, type CarVisual, type PartName } from './carModel';
 import type { CarSpec } from './catalog';
 
 /**
@@ -258,6 +258,7 @@ export function buildOpenWheelModel(opts: { number: number; color: string; seed:
       spoke.translateY(R * 0.25);
       spin.add(spoke);
     }
+    mergeByMaterial(spin);
     const discMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, metalness: 0.6, roughness: 0.5, emissive: 0xff3300, emissiveIntensity: 0 });
     brakeDiscs.push(discMat);
     const disc = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.5, R * 0.5, 0.03, 20), discMat);

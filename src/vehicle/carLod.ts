@@ -9,6 +9,10 @@ import type { CarVisual } from './carModel';
 interface LodState {
   mesh: THREE.Mesh;
   far: boolean;
+  /** Middle distance: tiny bits (interior, cage, vents, small decals) are hidden. */
+  mid: boolean;
+  details: THREE.Object3D[];
+  hiddenDetails: THREE.Object3D[];
   /** Children we hid when going far (restored when coming back; others stay as they were). */
   hidden: THREE.Object3D[];
 }
@@ -56,13 +60,34 @@ export function buildLod(v: CarVisual): void {
   mesh.receiveShadow = false;
   mesh.matrixAutoUpdate = false;
   v.root.add(mesh);
-  lods.set(v, { mesh, far: false, hidden: [] });
+  // small body bits that can't be seen from more than ~25 m (never detachable parts)
+  const keep = new Set<THREE.Object3D>();
+  for (const p of Object.values(v.parts)) p?.traverse((o) => keep.add(o));
+  for (const d of v.deformables) keep.add(d);
+  const details: THREE.Object3D[] = [];
+  const sphere = new THREE.Sphere();
+  v.body.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || keep.has(m) || o === v.body) return;
+    if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+    sphere.copy(m.geometry.boundingSphere!);
+    const sc = m.getWorldScale(new THREE.Vector3());
+    if (sphere.radius * Math.max(sc.x, sc.y, sc.z) < 0.33) details.push(m);
+  });
+  lods.set(v, { mesh, far: false, hidden: [], mid: false, details, hiddenDetails: [] });
 }
 
 /** Switch a car between full detail and the merged mesh based on camera distance (with hysteresis). */
 export function updateLod(v: CarVisual, camDist: number, lodDist: number): void {
   const s = lods.get(v);
   if (!s) return;
+  const midDist = Math.min(28, lodDist * 0.4);
+  const mid = s.mid ? camDist > midDist * 0.9 : camDist > midDist;
+  if (mid !== s.mid) {
+    s.mid = mid;
+    if (mid) { s.hiddenDetails = s.details.filter((d) => d.visible); s.hiddenDetails.forEach((d) => (d.visible = false)); }
+    else { s.hiddenDetails.forEach((d) => (d.visible = true)); s.hiddenDetails = []; }
+  }
   const far = s.far ? camDist > lodDist * 0.9 : camDist > lodDist;
   if (far === s.far) return;
   s.far = far;

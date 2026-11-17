@@ -103,7 +103,7 @@ export function arenaLobbyScreen(room: Room, h: ArenaLobbyHandlers) {
 
   const save = () => { saveArenaProfile(ap); room.setLoadout(loadout()); render(); };
   const render = () => {
-    if (!root.isConnected) return; // lobby not on screen (e.g. a player joined mid-match)
+    if (!root.querySelector('#cname')) return; // lobby not on screen (e.g. a player joined or left mid-match)
     const a = room.settings.arena ?? { bots: 7, events: 'off', timeLimit: 0 };
     const c = classById(ap.cls);
     $('#cname').textContent = c.name;

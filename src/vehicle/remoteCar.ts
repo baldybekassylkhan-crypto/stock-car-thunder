@@ -16,9 +16,11 @@ const _qa = new THREE.Quaternion();
 const _qb = new THREE.Quaternion();
 
 /**
- * Another player's (or a host-run bot's) car. Snapshots are buffered and played back ~120 ms in
- * the past so motion stays smooth despite jitter. A kinematic body follows the interpolated pose,
- * so our car collides with it solidly.
+ * Another player's (or a host-run bot's) car. Snapshots are buffered and played back a little in
+ * the past so motion stays smooth despite jitter: the delay adapts to each connection (about
+ * 100 ms on a steady link, up to 300 ms on a jittery one), and when a late packet forces a
+ * correction the difference is blended out over ~0.15 s instead of snapping. A kinematic body
+ * follows the smoothed pose, so our car collides with it solidly.
  */
 export class RemoteCar {
   visual: CarVisual;
@@ -35,6 +37,15 @@ export class RemoteCar {
   readonly goneApplied = new Set<PartName>();
   private opts: { number: number; color: string; seed: number };
   static readonly DELAY = 0.12;
+  /** Playback delay for this car (s), adapted to the measured packet jitter. */
+  private delay = RemoteCar.DELAY;
+  private lastArrival = -1;
+  private avgGap = 0.05;
+  private jitter = 0.01;
+  /** Visual correction still to blend out (m), and the pose we showed last frame. */
+  private corr = new THREE.Vector3();
+  private shown = new THREE.Vector3();
+  private shownT = -1;
 
   constructor(private physics: PhysicsWorld, readonly slot: number, opts: { number: number; color: string; seed: number }, pos: THREE.Vector3, quat: THREE.Quaternion, readonly spec: CarSpec = carSpec(undefined)) {
     this.opts = opts;
@@ -53,8 +64,18 @@ export class RemoteCar {
 
   push(s: CarState, now: number) {
     this.latest = s;
+    // measure how evenly packets arrive and size the playback delay to cover the jitter
+    if (this.lastArrival >= 0) {
+      const gap = Math.min(0.5, now - this.lastArrival);
+      this.avgGap += (gap - this.avgGap) * 0.05;
+      this.jitter += (Math.abs(gap - this.avgGap) - this.jitter) * 0.05;
+      const want = THREE.MathUtils.clamp(this.avgGap * 1.5 + this.jitter * 3 + 0.02, 0.09, 0.3);
+      // grow quickly when the link gets worse, shrink slowly when it calms down
+      this.delay += (want - this.delay) * (want > this.delay ? 0.2 : 0.01);
+    }
+    this.lastArrival = now;
     this.buf.push({ t: now, s });
-    if (this.buf.length > 30) this.buf.shift();
+    if (this.buf.length > 40) this.buf.shift();
   }
 
   get stale() {
@@ -63,7 +84,7 @@ export class RemoteCar {
 
   /** Interpolated pose at `now - DELAY`; sets the kinematic target. */
   sample(now: number) {
-    const rt = now - RemoteCar.DELAY;
+    const rt = now - this.delay;
     const b = this.buf;
     if (!b.length) return;
     let i = b.length - 1;
@@ -84,6 +105,19 @@ export class RemoteCar {
     }
     // drop very old snapshots
     while (b.length > 2 && b[1].t < rt - 0.5) b.shift();
+    // smooth corrections: if the new target is off from where the car was heading, keep showing
+    // the old path and blend the difference out (big jumps — respawns, resets — snap at once)
+    if (this.shownT >= 0) {
+      const dt = Math.min(0.1, Math.max(0, now - this.shownT));
+      const expected = _a.copy(this.shown).addScaledVector(this.vel, dt);
+      const err = _b.copy(expected).sub(this.pos);
+      if (err.lengthSq() < 9) this.corr.copy(err);
+      else this.corr.set(0, 0, 0);
+      this.corr.multiplyScalar(Math.exp(-dt / 0.12));
+      this.pos.add(this.corr);
+    }
+    this.shown.copy(this.pos);
+    this.shownT = now;
     this.body.setNextKinematicTranslation(this.pos);
     this.body.setNextKinematicRotation(this.quat);
   }

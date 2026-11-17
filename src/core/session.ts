@@ -716,6 +716,7 @@ export class Session {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     this.fps += (1 / Math.max(dt, 1e-4) - this.fps) * 0.05;
+    if (!this.paused) this.r.adapt(this.fps, dt);
     const nowS = now / 1000;
 
     if (wasPressed('Escape') || wasPressed('KeyP')) this.setPaused(!this.paused);
@@ -892,7 +893,7 @@ export class Session {
     this.map.update?.(dt, this.r.camera);
     this.effects.update(dt, this.r.camera, this.r.renderer.domElement.clientHeight);
     // far cars switch to a single merged mesh (32 full cars would be ~2,700 draw calls)
-    const lodDist = LOD_DISTANCE[settings.quality] ?? 70;
+    const lodDist = (LOD_DISTANCE[settings.quality] ?? 70) * this.r.lodScale;
     const cam = this.r.camera.position;
     for (const b of this.bots.values()) updateLod(b.car.visual, cam.distanceTo(b.car.position), lodDist);
     for (const rc of this.remotes.values()) updateLod(rc.visual, cam.distanceTo(rc.pos), lodDist);

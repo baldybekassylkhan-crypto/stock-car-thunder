@@ -5,6 +5,7 @@ import type { Atmosphere, LoadedMap } from './maps';
 import { makeGrid } from './maps';
 import * as tex from '../render/textures';
 import { rng, UP } from './props';
+import { within } from '../race/pits';
 
 /**
  * Generic road-course builder (used by the GP circuits): a spline centreline with elevation,
@@ -208,13 +209,37 @@ export function buildRoadCourse(def: RoadCourseDef): LoadedMap {
   }
 
   // ---------- tunnel ----------
+  // A lit tube (light walls and roof that glow a little, so it isn't a black hole at night) inside
+  // a concrete block with proper portals at both ends.
+  const TOP = 6.5, BLOCK = 12;
   for (const [a, b] of def.tunnels ?? []) {
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0x55585e, roughness: 0.8, side: THREE.DoubleSide });
-    const roof = ribbon(track, [a, b], (i) => [barrierAt(i, -1).addScaledVector(UP, 6.5), barrierAt(i, 1).addScaledVector(UP, 6.5)], { vScale: 6 });
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0xa9abb0, roughness: 0.8, emissive: 0x5a5650, emissiveIntensity: 0.55, side: THREE.DoubleSide });
+    const roof = ribbon(track, [a, b], (i) => [barrierAt(i, -1).addScaledVector(UP, TOP), barrierAt(i, 1).addScaledVector(UP, TOP)], { vScale: 6 });
     group.add(new THREE.Mesh(roof, roofMat));
     for (const side of [-1, 1]) {
-      const wall = ribbon(track, [a, b], (i) => [barrierAt(i, side).addScaledVector(UP, 1.1), barrierAt(i, side).addScaledVector(UP, 6.5)], { vScale: 6 });
+      const wall = ribbon(track, [a, b], (i) => [barrierAt(i, side).addScaledVector(UP, 1.1), barrierAt(i, side).addScaledVector(UP, TOP)], { vScale: 6 });
       group.add(new THREE.Mesh(wall, roofMat));
+    }
+    // the block above and beside the tube, and the two portal faces
+    const shellMat = new THREE.MeshStandardMaterial({ color: 0xcfc8ba, roughness: 0.85, emissive: 0x3a352c, emissiveIntensity: 0.5, side: THREE.DoubleSide });
+    const out = (i: number, side: number) => barrierAt(i, side).addScaledVector(track.R[i], side * 0.6);
+    group.add(new THREE.Mesh(ribbon(track, [a, b], (i) => [out(i, -1).addScaledVector(UP, BLOCK), out(i, 1).addScaledVector(UP, BLOCK)], { vScale: 6 }), shellMat));
+    for (const side of [-1, 1]) group.add(new THREE.Mesh(ribbon(track, [a, b], (i) => [out(i, side).addScaledVector(UP, 1.1), out(i, side).addScaledVector(UP, BLOCK)], { vScale: 6 }), shellMat));
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xffc24a, emissiveIntensity: 1.6 });
+    for (const end of [a, b]) {
+      const i = track.wrap(end);
+      const l = out(i, -1), r = out(i, 1);
+      const face = new THREE.BufferGeometry().setFromPoints([
+        l.clone().addScaledVector(UP, TOP), r.clone().addScaledVector(UP, TOP), r.clone().addScaledVector(UP, BLOCK),
+        l.clone().addScaledVector(UP, TOP), r.clone().addScaledVector(UP, BLOCK), l.clone().addScaledVector(UP, BLOCK),
+      ]);
+      face.computeVertexNormals();
+      group.add(new THREE.Mesh(face, shellMat));
+      // a glowing strip over the portal so the entrance reads at night
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(l.distanceTo(r), 0.35, 0.3), stripeMat);
+      strip.position.copy(l).lerp(r, 0.5).addScaledVector(UP, TOP + 0.6);
+      strip.rotation.y = Math.atan2(-(r.z - l.z), r.x - l.x); // box length (x) along the portal
+      group.add(strip);
     }
     const lampMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffe2b0, emissiveIntensity: 4 });
     for (let i = a; i < b; i += 8) {
@@ -228,27 +253,40 @@ export function buildRoadCourse(def: RoadCourseDef): LoadedMap {
 
   // ---------- street lamps (night) ----------
   if (def.lamps) {
-    const poleMat = new THREE.MeshStandardMaterial({ color: 0x5a5e66, metalness: 0.6, roughness: 0.5 });
+    // light grey poles that catch the light, with an arm out to the head (dark thin poles vanished
+    // at night and left the heads floating); none inside tunnels
+    const inTunnel = (i: number) => (def.tunnels ?? []).some(([a, b]) => within(track, i, track.wrap(a - 12), track.wrap(b + 12)));
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0xb4b9c0, metalness: 0.5, roughness: 0.45, emissive: 0x202226, emissiveIntensity: 1 });
     const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffd9a0, emissiveIntensity: 6 });
     const pole = new THREE.CylinderGeometry(0.1, 0.14, 9, 6);
     pole.translate(0, 4.5, 0);
     const count = Math.floor(n / 14) * 2;
     const poles = new THREE.InstancedMesh(pole, poleMat, count);
     const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(0.6, 0.25, 1.6), headMat, count);
+    const armGeo = new THREE.BoxGeometry(0.12, 0.12, 1);
+    const arms = new THREE.InstancedMesh(armGeo, poleMat, count);
     const o = new THREE.Object3D();
     let k = 0;
     for (let i = 0; i < n && k < count; i += 14) {
+      if (inTunnel(i)) continue;
       for (const side of [-1, 1]) {
         const p = barrierAt(i, side).addScaledVector(track.R[i], side * 1.2);
-        o.position.copy(p); o.rotation.set(0, 0, 0); o.updateMatrix();
+        o.position.copy(p); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); o.updateMatrix();
         poles.setMatrixAt(k, o.matrix);
-        o.position.copy(p).addScaledVector(UP, 9).addScaledVector(track.R[i], -side * 0.8); o.updateMatrix();
+        const head = p.clone().addScaledVector(UP, 9).addScaledVector(track.R[i], -side * 1.4);
+        const top = p.clone().addScaledVector(UP, 9.05);
+        o.position.copy(top).lerp(head, 0.5);
+        o.lookAt(head);
+        o.scale.set(1, 1, top.distanceTo(head));
+        o.updateMatrix();
+        arms.setMatrixAt(k, o.matrix);
+        o.position.copy(head).addScaledVector(UP, -0.1); o.rotation.set(0, Math.atan2(track.R[i].x, track.R[i].z), 0); o.scale.set(1, 1, 1); o.updateMatrix();
         heads.setMatrixAt(k, o.matrix);
         k++;
       }
     }
-    poles.count = heads.count = k;
-    group.add(poles, heads);
+    poles.count = heads.count = arms.count = k;
+    group.add(poles, heads, arms);
   }
 
   // ---------- ground ----------
